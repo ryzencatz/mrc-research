@@ -256,6 +256,57 @@ def analyze(st, recs, log=print):
     return out
 
 
+# -------------------------------------------------------------------- fits ---
+def growth_fits(results, r4=None):
+    """
+    Best-fit curves for points and segments per round k:
+
+        N(k) = exp(a + b·c^k)        (doubly exponential)
+
+    fitted by least squares on ln N. A plain exponential a·b^k fits badly
+    (ln N is not a straight line in k). Segments use the exact rounds 0-4;
+    points use rounds 0-3 plus the round-4 estimate, since four points alone
+    cannot pin down three parameters (they predict only ~5·10^6 for round 4).
+    """
+    from scipy.optimize import curve_fit
+
+    def model(k, a, b, c):
+        return a + b * c ** k
+
+    data = {
+        "points": [(r["k"], r["counts"]["points"], "exact") for r in results],
+        "segments": [(r["k"], r["counts"]["segments"], "exact") for r in results],
+    }
+    if r4:
+        k4 = results[-1]["k"] + 1
+        data["points"].append((k4, r4["points_before"] + r4["new_points_est"], "estimate"))
+        data["segments"].append((k4, r4["segments"], "exact"))
+    out = {}
+    for name, rows in data.items():
+        k = np.array([r[0] for r in rows], dtype=float)
+        ly = np.log(np.array([r[1] for r in rows], dtype=float))
+        (a, b, c), _ = curve_fit(model, k, ly, p0=(1.0, 0.5, 2.5), maxfev=20000)
+        resid = ly - model(k, a, b, c)
+        # plain exponential, for comparison
+        eb, ea = np.polyfit(k, ly, 1)
+        out[name] = dict(
+            a=float(a), b=float(b), c=float(c),
+            equation=f"N(k) = e^({a:.3f} + {b:.4f}·{c:.3f}^k)",
+            rms_log=float(np.sqrt(np.mean(resid ** 2))),
+            exp_rms_log=float(np.sqrt(np.mean((ly - (ea + eb * k)) ** 2))),
+            used=[dict(k=int(r[0]), value=float(r[1]), kind=r[2],
+                       fitted=float(np.exp(model(r[0], a, b, c)))) for r in rows],
+        )
+    return out
+
+
+FIT_MAX_ROUND = 8
+
+
+def fit_value(f, k):
+    return math.exp(f["a"] + f["b"] * f["c"] ** k)
+
+
 # ------------------------------------------------------------------ output ---
 LIGHT = dict(surface="#fcfcfb", ink="#0b0b0b", ink2="#52514e", muted="#898781",
              grid="#e1e0d9", axis="#c3c2b7", s1="#2a78d6", s2="#eb6834")
@@ -328,13 +379,111 @@ def write_csv(results):
                 w.writerow([v, m])
 
 
-def write_charts(results):
+def write_charts(results, r4=None, fits=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     plt.rcParams.update({"font.family": ["Helvetica", "Arial", "DejaVu Sans"],
                          "figure.facecolor": LIGHT["surface"], "savefig.facecolor": LIGHT["surface"]})
     rounds = [r["k"] for r in results]
+
+    # 0. points and segments over the rounds: actual counts joined by lines,
+    #    then the same data with the best-fit curves in a second chart
+    for with_fit, fname, title in ((False, "points_segments.png", "Points and segments per round"),):
+        if with_fit and not fits:
+            continue
+        fig, ax = plt.subplots(figsize=(7.2, 4.6))
+        k4 = rounds[-1] + 1
+        rounds_x = rounds + ([k4] if r4 else [])
+        pts = [r["counts"]["points"] for r in results]
+        segs = [r["counts"]["segments"] for r in results]
+        if with_fit:
+            kk = np.linspace(rounds_x[0], rounds_x[-1], 200)
+            for name, col in (("points", LIGHT["s1"]), ("segments", LIGHT["s2"])):
+                f = fits[name]
+                ax.plot(kk, [fit_value(f, x) for x in kk], color=col, lw=1.8, zorder=2,
+                        label=f"{name.capitalize()}: N(k) = e^({f['a']:.3f} + {f['b']:.4f}·{f['c']:.3f}^k)")
+            ax.scatter(rounds, pts, s=42, color=LIGHT["s1"], edgecolor=LIGHT["surface"], lw=1.2, zorder=4)
+            ax.scatter(rounds, segs, s=42, color=LIGHT["s2"], edgecolor=LIGHT["surface"], lw=1.2, zorder=4)
+        else:
+            ax.plot(rounds, pts, color=LIGHT["s1"], lw=2, marker="o", ms=6, label="Points (after the round)", zorder=3)
+            ax.plot(rounds, segs, color=LIGHT["s2"], lw=2, marker="o", ms=6, label="Segments drawn", zorder=3)
+        for x, y in zip(rounds, pts):
+            ax.annotate(f"{y:,}", (x, y), textcoords="offset points", xytext=(-7, 7), ha="right",
+                        fontsize=8, color=LIGHT["ink2"])
+        for x, y in zip(rounds, segs):
+            ax.annotate(f"{y:,}", (x, y), textcoords="offset points", xytext=(7, -12), ha="left",
+                        fontsize=8, color=LIGHT["ink2"])
+        if r4:
+            est = r4["points_before"] + r4["new_points_est"]
+            lo = r4["points_before"] + r4["new_points_low"]
+            hi = r4["points_before"] + r4["new_points_high"]
+            if not with_fit:
+                ax.plot([rounds[-1], k4], [pts[-1], est], color=LIGHT["s1"], lw=2, ls=(0, (3, 3)), zorder=2)
+                ax.plot([rounds[-1], k4], [segs[-1], r4["segments"]], color=LIGHT["s2"], lw=2, zorder=3)
+            ax.errorbar([k4], [est], yerr=[[est - lo], [hi - est]], fmt="o", ms=6.5, mfc=LIGHT["surface"],
+                        mec=LIGHT["s1"], mew=2, ecolor=LIGHT["s1"], elinewidth=1.5, capsize=4, zorder=4,
+                        label="Points, round 4 (estimate)")
+            ax.annotate(f"≈{est / 1e9:.2f} billion (est.)", (k4, est), textcoords="offset points",
+                        xytext=(-10, 4), ha="right", fontsize=8, color=LIGHT["ink2"])
+            ax.scatter([k4], [r4["segments"]], s=42, color=LIGHT["s2"], edgecolor=LIGHT["surface"], lw=1.2, zorder=4)
+            ax.annotate(f"{r4['segments']:,}", (k4, r4["segments"]), textcoords="offset points",
+                        xytext=(-9, -13), ha="right", fontsize=8, color=LIGHT["ink2"])
+        ax.set_yscale("log")
+        ax.set_xticks(rounds_x, [f"Round {k}" for k in rounds_x])
+        ax.set_xlim(rounds_x[0] - 0.3, rounds_x[-1] + 0.3)
+        ax.set_ylabel("Count (log scale)")
+        ax.set_title(title, loc="left", fontsize=12)
+        ax.legend(frameon=False, fontsize=8.5, labelcolor=LIGHT["ink2"], loc="upper left")
+        _style(ax)
+        fig.tight_layout()
+        fig.savefig(os.path.join(RESULTS, fname), dpi=160)
+        plt.close(fig)
+
+    # 0b. best-fit curves out to FIT_MAX_ROUND. The counts reach ~10^2000, so the
+    #     y axis is the number of digits, log10 N, on a log scale.
+    if fits:
+        fig, ax = plt.subplots(figsize=(7.6, 4.8))
+        last = rounds[-1] + (1 if r4 else 0)
+        ax.axvspan(last, FIT_MAX_ROUND + 0.3, color=LIGHT["grid"], alpha=0.45, lw=0, zorder=0)
+        ax.text((last + FIT_MAX_ROUND) / 2, 0.97, "predicted (no data)", transform=ax.get_xaxis_transform(),
+                ha="center", va="top", fontsize=8.5, color=LIGHT["muted"])
+        for name, col in (("points", LIGHT["s1"]), ("segments", LIGHT["s2"])):
+            f = fits[name]
+            dig = lambda k: (f["a"] + f["b"] * f["c"] ** k) / math.log(10)
+            k_in = np.linspace(0, last, 120)
+            k_out = np.linspace(last, FIT_MAX_ROUND, 120)
+            ax.plot(k_in, dig(k_in), color=col, lw=1.8, zorder=2,
+                    label=f"{name.capitalize()}: N(k) = e^({f['a']:.3f} + {f['b']:.4f}·{f['c']:.3f}^k)")
+            ax.plot(k_out, dig(k_out), color=col, lw=1.8, ls=(0, (4, 3)), zorder=2)
+            kp = np.arange(last + 1, FIT_MAX_ROUND + 1)
+            ax.scatter(kp, dig(kp), s=30, facecolor=LIGHT["surface"], edgecolor=col, lw=1.6, zorder=4)
+            k8 = dig(FIT_MAX_ROUND)
+            ax.annotate(f"≈10^{k8:,.0f}", (FIT_MAX_ROUND, k8), textcoords="offset points",
+                        xytext=(-8, 6 if name == "points" else -14), ha="right", fontsize=8, color=LIGHT["ink2"])
+        pts = [r["counts"]["points"] for r in results]
+        segs = [r["counts"]["segments"] for r in results]
+        ax.scatter(rounds, np.log10(pts), s=40, color=LIGHT["s1"], edgecolor=LIGHT["surface"], lw=1.2, zorder=5)
+        ax.scatter(rounds, np.log10(segs), s=40, color=LIGHT["s2"], edgecolor=LIGHT["surface"], lw=1.2, zorder=5)
+        if r4:
+            est = r4["points_before"] + r4["new_points_est"]
+            ax.scatter([last], [math.log10(est)], s=40, facecolor=LIGHT["surface"], edgecolor=LIGHT["s1"], lw=2, zorder=5)
+            ax.scatter([last], [math.log10(r4["segments"])], s=40, color=LIGHT["s2"], edgecolor=LIGHT["surface"], lw=1.2, zorder=5)
+        ax.set_yscale("log")
+        ticks = [1, 3, 10, 30, 100, 300, 1000, 3000]
+        ax.set_yticks(ticks, ["10" if t == 1 else f"$10^{{{t}}}$" for t in ticks])
+        fp = fits["points"]
+        ax.set_ylim(math.log10(4), (fp["a"] + fp["b"] * fp["c"] ** FIT_MAX_ROUND) / math.log(10) * 1.8)
+        ax.minorticks_off()
+        ax.set_xticks(range(FIT_MAX_ROUND + 1), [f"R{k}" for k in range(FIT_MAX_ROUND + 1)])
+        ax.set_xlim(-0.3, FIT_MAX_ROUND + 0.3)
+        ax.set_ylabel("Count (axis = number of digits)")
+        ax.set_title("Best-fit equations, extended to round 8", loc="left", fontsize=12)
+        ax.legend(frameon=False, fontsize=8.5, labelcolor=LIGHT["ink2"], loc="upper left")
+        _style(ax)
+        fig.tight_layout()
+        fig.savefig(os.path.join(RESULTS, "fits.png"), dpi=160)
+        plt.close(fig)
 
     # 1. growth: new points per round, with vs without gasket
     fig, ax = plt.subplots(figsize=(6.4, 4))
@@ -449,6 +598,35 @@ if __name__ == "__main__":
     st, recs = engine.run(R)
     results = analyze(st, recs)
     write_csv(results)
-    write_charts(results)
+    import golden
+    import round4
+    r4 = round4.get(st) if R == 3 else None
+    fits = growth_fits(results, r4)
+    write_charts(results, r4, fits)
     print_summary(results)
+    g = golden.facts(R)
+    print("\nGolden ratio (exact checks in Q(√5)):")
+    for c in g["checks"]:
+        print(f"  [{'ok' if c['holds'] else 'FAIL'}] {c['claim']}: {c['exact']}")
+    with open(os.path.join(RESULTS, "pentagons.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["layer", "born_in_round", "side", "diagonal", "circumradius",
+                    "size_vs_previous", "size_vs_P0", "size_vs_P0_exact"])
+        for L in g["layers"]:
+            w.writerow([f"P{L['layer']}", L["born"], f"{L['side']:.12f}", f"{L['diagonal']:.12f}",
+                        f"{L['circumradius']:.12f}", f"{L['ratio_prev']:.12f}" if L["ratio_prev"] else "",
+                        f"{L['ratio_p0']:.12f}", L["ratio_p0_exact"]])
+    print("\nBest fit, k = round number (least squares on ln N):")
+    with open(os.path.join(RESULTS, "fits.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["series", "equation", "a", "b", "c", "rms_error_ln", "round", "value", "kind", "fitted"])
+        for name, ft in fits.items():
+            print(f"  {name:<9} {ft['equation']}   (typical error ×{math.exp(ft['rms_log']):.2f}; "
+                  f"a plain exponential is off by ×{math.exp(ft['exp_rms_log']):.0f})")
+            for u in ft["used"]:
+                w.writerow([name, ft["equation"], ft["a"], ft["b"], ft["c"], ft["rms_log"],
+                            u["k"], u["value"], u["kind"], u["fitted"]])
+    if r4:
+        print(f"\nRound 4: {r4['segments']:,} segments (exact), "
+              f"≈{r4['new_points_est']:.3g} new points (estimate, {r4['new_points_low']:.2g}–{r4['new_points_high']:.2g})")
     print(f"\nWrote CSV files and charts to {RESULTS}")

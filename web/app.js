@@ -14,7 +14,8 @@
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), wrap = $("wrap"), tip = $("tip");
   const ctx = cv.getContext("2d");
-  const state = { k: 0, gasket: true, scale: 1, ox: 0, oy: 0, hover: -1 };
+  const state = { k: 0, gasket: true, scale: 1, ox: 0, oy: 0, hover: -1, layerHi: -1 };
+  const G = D.golden, R4 = D.round4, FIT = D.fits;
 
   const fmt = (n) => n.toLocaleString("en-US");
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -107,6 +108,21 @@
           ctx.moveTo(sx(P[i][0]) + rn, sy(P[i][1]));
           ctx.arc(sx(P[i][0]), sy(P[i][1]), rn, 0, 2 * Math.PI);
         }
+        ctx.stroke();
+      }
+    }
+
+    // outline of a nested pentagon hovered in the table
+    if (state.layerHi >= 0) {
+      const vs = [];
+      for (let i = 0; i < P.length; i++) if (P[i][3] === state.layerHi) vs.push(P[i]);
+      if (vs.length === 5) {
+        vs.sort((p, q) => Math.atan2(p[1], p[0]) - Math.atan2(q[1], q[0]));
+        ctx.strokeStyle = s2;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        vs.forEach((p, i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, sx(p[0]), sy(p[1])));
+        ctx.closePath();
         ctx.stroke();
       }
     }
@@ -293,6 +309,189 @@
     spectrumChart($("specChart"), g.eigs);
   }
 
+
+  // ------------------------------------------------------------ growth ---
+  // Points and segments per round on a log scale, actual counts joined by lines.
+  function growthChart(host) {
+    host.innerHTML = "";
+    const W = 360, H = 190, ml = 40, mr = 14, mt = 12, mb = 22;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+    const ks = R.map((r) => r.k).concat(R4 ? [R.length] : []);
+    const maxV = R4 ? R4.points_before + R4.new_points_high : R[R.length - 1].counts.points;
+    const top = Math.ceil(Math.log10(maxV));
+    const x = (k) => ml + (W - ml - mr) * (k / (ks.length - 1));
+    const y = (v) => mt + (H - mt - mb) * (1 - Math.log10(Math.max(v, 1)) / top);
+    for (let e = 0; e <= top; e += top > 6 ? 2 : 1) {
+      svg.appendChild(svgEl("line", { x1: ml, x2: W - mr, y1: y(10 ** e), y2: y(10 ** e), stroke: "var(--grid)" }));
+      const t = svgEl("text", { x: ml - 5, y: y(10 ** e) + 3.5, "text-anchor": "end", "font-size": 9.5, fill: "var(--muted)" });
+      t.textContent = e < 4 ? String(10 ** e) : `10^${e}`;
+      svg.appendChild(t);
+    }
+    ks.forEach((k) => {
+      const t = svgEl("text", { x: x(k), y: H - 6, "text-anchor": "middle", "font-size": 9.5, fill: "var(--muted)" });
+      t.textContent = `R${k}`;
+      svg.appendChild(t);
+    });
+    const k4 = R.length, last = R.length - 1;
+    const est = R4 ? R4.points_before + R4.new_points_est : 0;
+    // the actual counts, joined by straight lines
+    for (const [key, color] of [["points", "var(--s1)"], ["segments", "var(--s2)"]]) {
+      const pts = R.map((r, k) => `${x(k)},${y(r.counts[key])}`).join(" ");
+      svg.appendChild(svgEl("polyline", { points: pts, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round" }));
+    }
+    if (R4) {
+      svg.appendChild(svgEl("line", { x1: x(last), y1: y(R[last].counts.points), x2: x(k4), y2: y(est),
+        stroke: "var(--s1)", "stroke-width": 2, "stroke-dasharray": "4 3" }));
+      svg.appendChild(svgEl("line", { x1: x(last), y1: y(R[last].counts.segments), x2: x(k4), y2: y(R4.segments),
+        stroke: "var(--s2)", "stroke-width": 2 }));
+    }
+    if (R4) {
+      const lo = R4.points_before + R4.new_points_low, hi = R4.points_before + R4.new_points_high;
+      svg.appendChild(svgEl("line", { x1: x(k4), x2: x(k4), y1: y(lo), y2: y(hi), stroke: "var(--s1)", "stroke-width": 1.5 }));
+      for (const yy of [lo, hi]) svg.appendChild(svgEl("line", { x1: x(k4) - 4, x2: x(k4) + 4, y1: y(yy), y2: y(yy), stroke: "var(--s1)", "stroke-width": 1.5 }));
+    }
+    const marker = (cx, cy, color, hollow, html) => {
+      svg.appendChild(svgEl("circle", { cx, cy, r: 4.5, fill: hollow ? "var(--surface)" : color, stroke: hollow ? color : "var(--surface)", "stroke-width": hollow ? 2 : 1.5 }));
+      const hit = svgEl("circle", { cx, cy, r: 11, fill: "transparent" });
+      hit.addEventListener("mousemove", (ev) => showTip(ev, html));
+      hit.addEventListener("mouseleave", hideTip);
+      svg.appendChild(hit);
+    };
+    R.forEach((r, k) => {
+      marker(x(k), y(r.counts.points), "var(--s1)", false, `<b>Round ${k}</b><br>${fmt(r.counts.points)} points`);
+      marker(x(k), y(r.counts.segments), "var(--s2)", false, `<b>Round ${k}</b><br>${fmt(r.counts.segments)} segments`);
+    });
+    if (R4) {
+      marker(x(k4), y(est), "var(--s1)", true,
+        `<b>Round 4 (estimate)</b><br>≈ ${(est / 1e9).toFixed(2)} billion points<br>range ${(R4.new_points_low / 1e9).toFixed(1)}–${(R4.new_points_high / 1e9).toFixed(1)} billion new`);
+      marker(x(k4), y(R4.segments), "var(--s2)", false, `<b>Round 4 (exact)</b><br>${fmt(R4.segments)} segments`);
+    }
+    host.appendChild(svg);
+  }
+
+  // Best-fit curves N(k) = exp(a + b·c^k) out to FIT_MAX_ROUND. The counts
+  // explode (≈10^2000 by round 8), so the y axis is the number of digits of N
+  // (log10 N) on a log scale: gridlines at 10, 10^10, 10^100, 10^1000.
+  const FIT_MAX_ROUND = 8;
+  function fitChart(host) {
+    host.innerHTML = "";
+    if (!FIT) return;
+    const W = 360, H = 210, ml = 44, mr = 14, mt = 12, mb = 22;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+    const lastData = R4 ? R.length : R.length - 1;
+    const lnN = (f, k) => f.a + f.b * f.c ** k;                 // natural log of the fitted count
+    const digits = (ln) => ln / Math.LN10;                      // log10 N
+    const lo = Math.log10(digits(Math.log(4))), hiDigits = digits(lnN(FIT.points, FIT_MAX_ROUND));
+    const hi = Math.log10(hiDigits) + 0.15;
+    const x = (k) => ml + (W - ml - mr) * (k / FIT_MAX_ROUND);
+    const y = (ln) => mt + (H - mt - mb) * (1 - (Math.log10(digits(ln)) - lo) / (hi - lo));
+    // shaded band for the extrapolated rounds
+    svg.appendChild(svgEl("rect", { x: x(lastData), y: mt, width: x(FIT_MAX_ROUND) - x(lastData), height: H - mt - mb,
+      fill: "var(--grid)", opacity: 0.35 }));
+    const lab = svgEl("text", { x: (x(lastData) + x(FIT_MAX_ROUND)) / 2, y: mt + 11, "text-anchor": "middle", "font-size": 9.5, fill: "var(--muted)" });
+    lab.textContent = "predicted (no data)";
+    svg.appendChild(lab);
+    for (const e of [1, 3, 10, 30, 100, 300, 1000, 3000]) {
+      if (Math.log10(e) < lo || Math.log10(e) > hi) continue;
+      const yy = y(e * Math.LN10);
+      svg.appendChild(svgEl("line", { x1: ml, x2: W - mr, y1: yy, y2: yy, stroke: "var(--grid)" }));
+      const t = svgEl("text", { x: ml - 5, y: yy + 3.5, "text-anchor": "end", "font-size": 9.5, fill: "var(--muted)" });
+      t.textContent = e === 1 ? "10" : `10^${e}`;
+      svg.appendChild(t);
+    }
+    for (let k = 0; k <= FIT_MAX_ROUND; k++) {
+      const t = svgEl("text", { x: x(k), y: H - 6, "text-anchor": "middle", "font-size": 9.5, fill: "var(--muted)" });
+      t.textContent = `R${k}`;
+      svg.appendChild(t);
+    }
+    const series = [["points", "var(--s1)"], ["segments", "var(--s2)"]];
+    for (const [name, color] of series) {
+      const f = FIT[name];
+      const path = (k0, k1) => { const p = []; for (let k = k0; k <= k1 + 1e-9; k += 0.05) p.push(`${x(k)},${y(lnN(f, k))}`); return p.join(" "); };
+      svg.appendChild(svgEl("polyline", { points: path(0, lastData), fill: "none", stroke: color, "stroke-width": 1.8 }));
+      svg.appendChild(svgEl("polyline", { points: path(lastData, FIT_MAX_ROUND), fill: "none", stroke: color, "stroke-width": 1.8, "stroke-dasharray": "4 3" }));
+    }
+    const dot = (k, ln, color, hollow, html) => {
+      svg.appendChild(svgEl("circle", { cx: x(k), cy: y(ln), r: hollow ? 3.5 : 4.5, fill: hollow ? "var(--surface)" : color,
+        stroke: hollow ? color : "var(--surface)", "stroke-width": hollow ? 1.8 : 1.5 }));
+      const hit = svgEl("circle", { cx: x(k), cy: y(ln), r: 10, fill: "transparent" });
+      hit.addEventListener("mousemove", (ev) => showTip(ev, html));
+      hit.addEventListener("mouseleave", hideTip);
+      svg.appendChild(hit);
+    };
+    const big = (ln) => {
+      const d = digits(ln);
+      if (d < 15) return fmt(Math.round(Math.exp(ln)));
+      const m = 10 ** (d - Math.floor(d));
+      return `≈ ${m.toFixed(2)} × 10^${fmt(Math.floor(d))} (${fmt(Math.floor(d) + 1)} digits)`;
+    };
+    // actual counts (filled) and predictions for later rounds (hollow)
+    R.forEach((r, k) => {
+      dot(k, Math.log(r.counts.points), "var(--s1)", false, `<b>Round ${k}: ${fmt(r.counts.points)} points</b><br>fit: ${big(lnN(FIT.points, k))}`);
+      dot(k, Math.log(r.counts.segments), "var(--s2)", false, `<b>Round ${k}: ${fmt(r.counts.segments)} segments</b><br>fit: ${big(lnN(FIT.segments, k))}`);
+    });
+    if (R4) {
+      const k4 = R.length, est = R4.points_before + R4.new_points_est;
+      dot(k4, Math.log(est), "var(--s1)", true, `<b>Round 4: ≈ ${(est / 1e9).toFixed(2)} billion points (estimate)</b><br>fit: ${big(lnN(FIT.points, k4))}`);
+      dot(k4, Math.log(R4.segments), "var(--s2)", false, `<b>Round 4: ${fmt(R4.segments)} segments</b><br>fit: ${big(lnN(FIT.segments, k4))}`);
+    }
+    for (let k = lastData + 1; k <= FIT_MAX_ROUND; k++) {
+      for (const [name, color] of series) {
+        const ln = lnN(FIT[name], k);
+        dot(k, ln, color, true, `<b>Round ${k} (predicted)</b><br>${name}: ${big(ln)}`);
+      }
+    }
+    host.appendChild(svg);
+  }
+
+  function growthText() {
+    if (R4) $("growthNote").textContent =
+      `Round 4: ${fmt(R4.segments)} segments, counted exactly. The point count is an estimate: ` +
+      `${fmt(R4.samples)} random pairs of segments were sampled, ${(100 * R4.crossing_fraction).toFixed(1)}% cross at a new spot, ` +
+      `and several segments can cross at one point, giving about ${(R4.new_points_low / 1e9).toFixed(1)}–${(R4.new_points_high / 1e9).toFixed(1)} billion new points.`;
+    if (!FIT) return;
+    const eq = (f) => `N(k) = e<sup>${f.a.toFixed(3)} + ${f.b.toFixed(4)}·${f.c.toFixed(3)}<sup>k</sup></sup>`;
+    $("fitEqs").innerHTML =
+      `<div><i class="sw-line" style="background:var(--s1)"></i><b>Points:</b> ${eq(FIT.points)}</div>` +
+      `<div><i class="sw-line" style="background:var(--s2)"></i><b>Segments:</b> ${eq(FIT.segments)}</div>`;
+    $("fitNote").innerHTML =
+      `N is the count and k is the round number (0, 1, 2, …). The curves are fitted by least squares on ln N and are typically within ` +
+      `×${Math.exp(FIT.points.rms_log).toFixed(2)} (points) and ×${Math.exp(FIT.segments.rms_log).toFixed(2)} (segments) of the real counts. ` +
+      `A plain exponential a·bᵏ is off by ×${Math.exp(FIT.points.exp_rms_log).toFixed(0)} on points. ` +
+      `The points curve includes the round-4 estimate, because four rounds alone can’t pin it down. ` +
+      `c ≈ ${FIT.points.c.toFixed(2)} is close to 4, which fits each round’s points growing like the previous round’s to the 4th power.`;
+  }
+
+  // ------------------------------------------------------------ layers ---
+  function layerTable() {
+    const body = $("layerTable").querySelector("tbody");
+    body.innerHTML = G.layers.map((L) => `
+      <tr data-layer="${L.layer}" class="${L.born <= state.k ? "" : "future"}">
+        <td>P${L.layer}</td><td>round ${L.born}</td>
+        <td>${L.side.toFixed(6)}</td><td>${L.diagonal.toFixed(6)}</td>
+        <td>${L.ratio_prev ? `${L.ratio_prev.toFixed(6)} = φ²` : "–"}</td>
+      </tr>`).join("");
+  }
+
+  // ------------------------------------------------------------ golden ---
+  function goldenPanel() {
+    $("goldenChecks").innerHTML = G.checks.map((c) => `
+      <li><span class="${c.holds ? "ok" : "bad"}">${c.holds ? "✓" : "✕"}</span>
+        <span class="claim">${c.claim}</span><br>
+        <span class="val">${c.exact} ≈ ${Math.abs(c.value) < 1 ? c.value.toFixed(9) : c.value.toFixed(9)}</span>
+        <br><span class="claim" style="color:var(--muted)">${c.detail}</span></li>`).join("");
+    const m = G.map;
+    $("mapText").innerHTML =
+      `Each nested pentagon is the previous one shrunk and flipped through the centre: every vertex <i>v</i> goes to ` +
+      `<b>−<i>v</i>/φ²</b>. As a map of the plane this is the matrix ${m.matrix.replace(" (exact, in any coordinates)", "")}, ` +
+      `so its eigenvalue is <b>${m.eigenvalue_exact} ≈ ${m.eigenvalue.toFixed(6)}</b>. ` +
+      `Repeating it n times multiplies by (−1/φ²)ⁿ, so sizes shrink by φ², φ⁴, φ⁶, … ` +
+      `This is the “mapping ratio becomes higher powers of φ” from your notes. It belongs to this geometric map, ` +
+      `not to the Laplacian of the drawing (see the spectrum below).`;
+    $("mapTable").querySelector("tbody").innerHTML = m.powers.map((p) =>
+      `<tr><td>${p.n}</td><td>${p.value.toFixed(9)}</td><td>${p.exact}</td></tr>`).join("");
+  }
+
   // ------------------------------------------------------------ tooltip ---
   function showTip(ev, html) {
     tip.innerHTML = html;
@@ -338,6 +537,7 @@
   }
   function render() {
     countsTable();
+    layerTable();
     geometry();
     graphPanel();
     legend();
@@ -354,6 +554,12 @@
     const tr = e.target.closest("tr");
     if (tr) setRound(+tr.dataset.k);
   });
+  $("layerTable").addEventListener("mouseover", (e) => {
+    const tr = e.target.closest("tr[data-layer]");
+    const j = tr ? +tr.dataset.layer : -1;
+    if (j !== state.layerHi) { state.layerHi = j; draw(); }
+  });
+  $("layerTable").addEventListener("mouseleave", () => { state.layerHi = -1; draw(); });
   $("zoomIn").addEventListener("click", () => zoomAt(wrap.clientWidth / 2, wrap.clientHeight / 2, 1.5));
   $("zoomOut").addEventListener("click", () => zoomAt(wrap.clientWidth / 2, wrap.clientHeight / 2, 1 / 1.5));
   $("reset").addEventListener("click", () => { fit(); draw(); });
@@ -399,5 +605,9 @@
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get("gasket") === "0") { state.gasket = false; $("gasket").checked = false; }
   fit();
+  growthChart($("growthChart"));
+  fitChart($("fitChart"));
+  growthText();
+  goldenPanel();
   setRound(+(hash.get("round") || 0));
 })();

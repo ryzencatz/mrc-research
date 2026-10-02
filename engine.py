@@ -129,6 +129,7 @@ class State:
         self.birth = []      # round in which each point appeared
         self.layer = []      # pentagasket layer of each point, or -1
         self.layer_of = {}   # exact point -> layer, for layers not yet born
+        self.layers = []     # exact vertices of P0, P1, ... in cyclic order
         self.n_segments = 5  # segments drawn in the latest round (round 0: the sides)
 
     def add(self, p, birth):
@@ -161,6 +162,7 @@ def initial_state(max_layers=6):
     layers = [regular_pentagon()]
     for _ in range(max_layers):
         layers.append(pentagram_core(layers[-1]))
+    st.layers = layers
     for j, lay in enumerate(layers):
         for p in lay:
             st.layer_of[p] = j

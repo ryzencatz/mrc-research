@@ -11,6 +11,8 @@ import numpy as np
 
 import analysis
 import engine
+import golden
+import round4
 
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
@@ -58,7 +60,11 @@ def build(rounds, fresh):
                       dir_hist=hist(g["line_dirs"], 3.0), angle_hist=hist(g["angle_gaps"], 3.0)),
             graph={"with": graph_json(res["with"]), "without": graph_json(res["without"])},
         ))
-    return dict(points=points, rounds=out_rounds), results
+    extra = dict(golden=golden.facts(rounds))
+    if rounds == 3:
+        extra["round4"] = round4.get(st)
+    extra["fits"] = analysis.growth_fits(results, extra.get("round4"))
+    return dict(points=points, rounds=out_rounds, **extra), results
 
 
 def main():

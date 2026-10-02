@@ -64,7 +64,7 @@
   }
   .app {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-columns: minmax(0, 4fr) minmax(320px, 1fr);   /* sidebar ≈ 1/5 of the width */
     grid-template-rows: auto minmax(0, 1fr);
     height: 100vh;
   }
@@ -165,6 +165,19 @@
   }
   .tip b { font-weight: 600; }
   .empty { color: var(--muted); font-size: 12.5px; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink2); margin-top: 6px; }
+  .key span { display: inline-flex; align-items: center; gap: 6px; }
+  .fits { margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .fits div { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .fits sup { font-size: 0.78em; }
+  .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  .checks li { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; }
+  .checks .claim { color: var(--ink2); }
+  .checks .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .checks .ok { color: var(--good); font-weight: 600; }
+  .checks .bad { color: var(--critical); font-weight: 600; }
+  .prose { font-size: 12.5px; color: var(--ink2); margin: 0 0 8px; }
+  #layerTable tbody tr.future td { color: var(--muted); }
 
   @media (max-width: 900px) {
     .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; height: auto; }
@@ -222,6 +235,51 @@
         <tbody id="countsBody"></tbody>
       </table>
       <p class="note">“Without” recounts the round’s crossings after removing every segment that lies along a side or diagonal of one of the nested pentagons, on the same point set.</p>
+    </section>
+
+    <section>
+      <h2>Points and segments per round</h2>
+      <div class="chart" id="growthChart"></div>
+      <div class="key">
+        <span><i class="sw-dot" style="background:var(--s1)"></i>Points</span>
+        <span><i class="sw-dot" style="background:var(--s2)"></i>Segments</span>
+        <span><i class="sw-ring"></i>Estimate</span>
+      </div>
+      <p class="note" id="growthNote"></p>
+    </section>
+
+    <section>
+      <h2>Best-fit equations</h2>
+      <div class="chart" id="fitChart"></div>
+      <div class="key">
+        <span><i class="sw-line" style="background:var(--s1)"></i>Points fit</span>
+        <span><i class="sw-line" style="background:var(--s2)"></i>Segments fit</span>
+        <span><i class="sw-dot" style="background:var(--ink2)"></i>Actual counts</span>
+        <span><i class="sw-ring" style="border-color:var(--ink2)"></i>Predicted</span>
+      </div>
+      <div class="fits" id="fitEqs"></div>
+      <p class="note" id="fitNote"></p>
+    </section>
+
+    <section>
+      <h2>Nested pentagons</h2>
+      <table id="layerTable">
+        <thead><tr><th>Layer</th><th>Appears</th><th>Side</th><th>Diagonal</th><th>Smaller<br>than previous</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note">Measured on the computed vertices; the outer pentagon has circumradius 1. Hover a row to outline that pentagon.</p>
+    </section>
+
+    <section>
+      <h2>The golden ratio</h2>
+      <ul class="checks" id="goldenChecks"></ul>
+      <h3>From one pentagon to the next</h3>
+      <p class="prose" id="mapText"></p>
+      <table class="mini" id="mapTable">
+        <thead><tr><th>Steps n</th><th>Factor (−1/φ²)ⁿ</th><th>Exact</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note">Every value above is checked in exact arithmetic with √5, not with decimals.</p>
     </section>
 
     <section>
