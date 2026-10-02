@@ -192,7 +192,7 @@ def graph_stats(pf, rd, n, without_gasket):
 
 
 # ---------------------------------------------------------------- geometry ---
-def geometry_stats(pf, rd, n_prev, n):
+def geometry_stats(pf, rd, n):
     side = float(np.linalg.norm(pf[0] - pf[1]))
     # line directions in degrees, mod 180
     dirs = []
@@ -219,10 +219,9 @@ def geometry_stats(pf, rd, n_prev, n):
         min_at.append(g.min())
     gaps = np.array(gaps)
 
-    # segments drawn this round: every pair of the previous round's points
-    P = pf[:n_prev]
-    i, j = np.triu_indices(n_prev, 1)
-    lens = np.linalg.norm(P[i] - P[j], axis=1) / side
+    # segments drawn this round: one per line, from its first point to its last
+    ends = np.array([[line["pts"][0], line["pts"][-1]] for line in rd.lines])
+    lens = np.linalg.norm(pf[ends[:, 0]] - pf[ends[:, 1]], axis=1) / side
     e = np.log(lens) / math.log(PHI)
     phi_pow = np.isclose(e, np.round(e), atol=1e-9)
 
@@ -245,7 +244,6 @@ def analyze(st, recs, log=print):
     for rd in recs:
         k = rd.k
         n = rd.n_points
-        n_prev = n - rd.new_points if k > 0 else 5
         log(f"  analysing round {k} ({n} points)")
         res = dict(k=k, counts=dict(points=n, new=rd.new_points, new_ng=rd.new_points_ng,
                                     segments=rd.segments, gasket_segments=rd.gasket_segments,
@@ -253,7 +251,7 @@ def analyze(st, recs, log=print):
                                     directions=rd.n_directions))
         res["with"] = graph_stats(pf, rd, n, without_gasket=False)
         res["without"] = graph_stats(pf, rd, n, without_gasket=True)
-        res["geom"] = geometry_stats(pf, rd, n_prev, n)
+        res["geom"] = geometry_stats(pf, rd, n)
         out.append(res)
     return out
 

@@ -7,8 +7,6 @@ Then open web/index.html (no server needed).
 import argparse
 import json
 import os
-from itertools import combinations
-
 import numpy as np
 
 import analysis
@@ -46,11 +44,9 @@ def build(rounds, fresh):
         lines = []
         for line in rd.lines:
             pts = line["pts"]
-            old = [p for p in pts if st.birth[p] < rd.k or rd.k == 0]
-            gasket = [[u, v] for u, v in combinations(old, 2)
-                      if st.layer[u] >= 0 and st.layer[u] == st.layer[v]]
-            lines.append(dict(span=[pts[0], pts[-1]], ng=[list(r) for r in line["ng"]],
-                              gasket=gasket, n=len(pts)))
+            span = [pts[0], pts[-1]]
+            lines.append(dict(span=span, ng=[list(r) for r in line["ng"]],
+                              gasket=[span] if line["gasket"] else [], n=len(pts)))
         g = res["geom"]
         out_rounds.append(dict(
             k=rd.k, counts=res["counts"], lines=lines, ng_points=rd.ng_points,

@@ -19,10 +19,12 @@ Views can be linked with a URL hash, for example `web/index.html#round=3&gasket=
 ## Rules used
 
 - **Round 0** is the 5 vertices and the 5 sides.
-- **Round k** joins every pair of points that is not already joined. Each pair is its own segment ("separate segments").
-  Any crossing of two segments that is not already a point becomes a new point. Collinear or overlapping segments never create points.
-- **Pentagasket.** Layer P0 is the pentagon. Layer P(j+1) is the 5 crossings of P(j)'s diagonals. A *gasket segment* has both endpoints in the same layer.
-- **"Without pentagasket"** recounts a round's crossings using only non-gasket segments, on the same point set.
+- **Round k** joins every pair of points. Collinear points share one segment ("merged segments"): every line through two or more points carries a single segment from its first point to its last.
+  Any crossing of two segments that is not already a point becomes a new point.
+  Points made in a round are only joined in the next round.
+- **Pentagasket.** Layer P0 is the pentagon. Layer P(j+1) is the 5 crossings of P(j)'s diagonals, so each layer is φ² smaller and rotated 36°.
+  Round k creates layer Pk. A *gasket segment* lies along a side or diagonal of one of these layers.
+- **"Without pentagasket"** recounts a round's crossings with the gasket segments removed entirely, on the same point set.
   The actual process always uses all segments.
 
 ## Files
@@ -38,17 +40,20 @@ Views can be linked with a URL hash, for example `web/index.html#round=3&gasket=
 
 ## Results so far (rounds 0–3)
 
-| Round | Points | New (with gasket) | New (without) | Segments | Lines | Directions |
+| Round | Points | New (with gasket) | New (without) | Segments | Gasket segments | Directions |
 |---|---|---|---|---|---|---|
 | 0 | 5 | – | – | 5 | 5 | 5 |
 | 1 | 10 | 5 | 0 | 10 | 10 | 5 |
-| 2 | 26 | 16 | 6 | 45 | 20 | 10 |
-| 3 | 741 | 715 | 675 | 325 | 100 | 50 |
+| 2 | 26 | 16 | 1 | 20 | 15 | 10 |
+| 3 | 741 | 715 | 625 | 100 | 20 | 50 |
 
 - **Symmetry.** New-point counts respect the 5-fold symmetry: 5, 15 + the centre, and 715 = 5 × 143.
-- **Growth.** It looks doubly exponential. Round 4 would draw C(741, 2) = 273,870 segments, which is beyond this engine.
+- **Growth.** It looks doubly exponential. Round 4 joins C(741, 2) = 274,170 pairs of points.
+  Merging collinear pairs leaves an estimated ~250,000 segments, and probably a few billion new points, which is beyond this engine.
 - **Directions.** All directions are multiples of 18° up to round 2. Round 3 adds 40 new directions.
   The smallest angle drops 36° → 18° → 1.8°, and the closest pair of points goes 0.449 → 0.0858 → 0.00417.
-- **φ in the Laplacian spectrum.** The eigenvalues are in Q(√5) only for rounds 0 and 1, for example 5 − 2φ and 3 + 2φ.
-  From round 2 on, no eigenvalue except 0 lies in Q(√5). The test is complete: it pairs each eigenvalue a + bφ with its conjugate a + bφ′.
-- **Faces.** Round 2's arrangement consists only of triangles: 45 with the gasket and 20 without. Quadrilaterals first appear in round 3.
+- **φ in the Laplacian spectrum.** With the gasket, the eigenvalues are in Q(√5) only for rounds 0 and 1, for example 5 − 2φ and 3 + 2φ.
+  From round 2 on, no eigenvalue except 0 lies in Q(√5).
+  Without the gasket, round 2 is just the 5 symmetry axes (all 26 points lie on them), a tree whose spectrum includes 2 − φ and 1 + φ.
+  The test is complete: it pairs each eigenvalue a + bφ with its conjugate a + bφ′.
+- **Faces.** Round 2 with the gasket consists only of triangles (45 of them). Quadrilaterals first appear in round 3.

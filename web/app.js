@@ -255,13 +255,13 @@
     $("graphTitle").textContent = `Arrangement graph · round ${state.k} · ${state.gasket ? "with" : "without"} pentagasket`;
     const body = $("graphBody");
     if (!g.E) {
-      body.innerHTML = `<p class="empty">No segments remain in round ${state.k} once the pentagasket is removed. Every segment drawn so far joins two points of the same layer.</p>`;
+      body.innerHTML = `<p class="empty">No segments remain in round ${state.k} once the pentagasket is removed. Every segment drawn so far lies along a side or diagonal of a nested pentagon.</p>`;
       return;
     }
     const euler = g.euler_ok
       ? `<span class="status ok">✓ Euler check holds: V − E + F = C</span>`
       : `<span class="status bad">✕ Euler check fails</span>`;
-    const maxF = Math.max(...Object.values(g.faces));
+    const maxF = Math.max(1, ...Object.values(g.faces));
     const faces = Object.entries(g.faces).map(([c, m]) =>
       `<tr><td>${c}-gon</td><td>${fmt(m)}</td><td style="width:55%"><span class="bar" style="width:${(100 * m / maxF).toFixed(1)}%"></span></td></tr>`).join("");
     const maxD = Math.max(...Object.values(g.degrees));
@@ -278,7 +278,7 @@
       </div>
       <p style="margin:8px 0 0">${euler}</p>
       <h3>Faces by number of corners</h3>
-      <table class="mini"><tbody>${faces}</tbody></table>
+      ${faces ? `<table class="mini"><tbody>${faces}</tbody></table>` : `<p class="empty">No bounded faces: the graph has no cycles${g.C === 1 ? " (it is a tree)" : ""}.</p>`}
       <h3>Degree distribution</h3>
       <table class="mini"><thead><tr><th>Degree</th><th>Vertices</th><th></th></tr></thead><tbody>${degs}</tbody></table>
       <h3>Laplacian spectrum (L = D − A)</h3>

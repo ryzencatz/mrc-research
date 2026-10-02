@@ -1,8 +1,9 @@
 """
 Independent brute-force check of engine.py.
 
-Tests every pair of segments in exact Q(√5) arithmetic (no line grouping, no
-float pre-filter) and compares the counts per round with the engine.
+Builds the merged segments (one per line, first point to last) with direct
+collinearity tests, then tests every pair of segments in exact Q(√5)
+arithmetic, with no float pre-filter, and compares the counts with the engine.
 """
 import math
 import sys
@@ -60,26 +61,51 @@ def layers(n):
     return out
 
 
+def merged_segments(pts, layer_of):
+    """
+    One segment per line through 2+ points, from its first point to its last.
+    Collinearity is tested directly with cross products (no line keys).
+    Returns [(P, Q, is_gasket)].
+    """
+    done = set()
+    out = []
+    for P, Q in combinations(pts, 2):
+        if (P, Q) in done:
+            continue
+        d = sub(Q, P)
+        on = [R for R in pts if cross(d, sub(R, P)).is_zero()]
+        for A, B in combinations(on, 2):
+            done.add((A, B))
+            done.add((B, A))
+        # extreme points along the line: compare the parameter (R - P)·d exactly
+        par = lambda R: sub(R, P)[0] * d[0] + sub(R, P)[1] * d[1]
+        lo = min(on, key=lambda R: float(par(R)))
+        hi = max(on, key=lambda R: float(par(R)))
+        assert all(par(lo) < par(R) or par(lo) == par(R) for R in on)
+        assert all(par(R) < par(hi) or par(R) == par(hi) for R in on)
+        layers_on = [layer_of[R] for R in on if R in layer_of]
+        out.append((lo, hi, len(layers_on) > len(set(layers_on))))
+    return out
+
+
 def brute(rounds):
     lay = layers(rounds + 1)
     layer_of = {p: j for j, L in enumerate(lay) for p in L}
     pts = list(lay[0])
-    segs = [(pts[i], pts[(i + 1) % 5]) for i in range(5)]
     result = []
     for k in range(1, rounds + 1):
         have = set(pts)
-        segs = list(combinations(pts, 2))
-        gasket = [p in layer_of and q in layer_of and layer_of[p] == layer_of[q] for p, q in segs]
+        segs = merged_segments(pts, layer_of)
         new, new_ng = set(), set()
-        for (a, (P, Q)), (b, (R, S)) in combinations(enumerate(segs), 2):
+        for (P, Q, ga), (R, S, gb) in combinations(segs, 2):
             X = seg_cross(P, Q, R, S)
             if X is None or X in have:
                 continue
             new.add(X)
-            if not gasket[a] and not gasket[b]:
+            if not ga and not gb:
                 new_ng.add(X)
         pts = pts + sorted(new, key=engine.to_true)
-        result.append((k, len(pts), len(new), len(new_ng), len(segs), sum(gasket)))
+        result.append((k, len(pts), len(new), len(new_ng), len(segs), sum(g for _, _, g in segs)))
     return result
 
 

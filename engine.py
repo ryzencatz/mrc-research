@@ -1,22 +1,19 @@
 """
 Meta-intersecting regular pentagon: exact round-by-round engine.
 
-Rules (separate-segments version)
----------------------------------
+Rules (merged-segments version)
+-------------------------------
 Round 0: the 5 vertices of a regular pentagon and its 5 sides.
-Round k: join every pair of points that is not joined yet (each pair is its own
-segment). Every crossing of two segments that is not already a point becomes a
-new point.
-
-Collinear segments never create points, so the set of points that segments on
-one line can create depends only on the union of those segments. The engine
-therefore groups segments by their supporting line and intersects lines.
+Round k: join every pair of points. Collinear points share one segment: each
+line through two or more points carries a single segment from its first point
+to its last. Every crossing of two segments that is not already a point becomes
+a new point.
 
 Pentagasket: layer P0 is the original pentagon; layer P(j+1) is the 5 crossing
-points of P(j)'s diagonals. A segment is a gasket segment when both endpoints
-are in the same layer (every pair of a layer is a side or a diagonal of it).
-The "without pentagasket" count recounts a round's crossings using only the
-non-gasket segments, on the same point set.
+points of P(j)'s diagonals. A segment is a gasket segment when its line passes
+through two points of the same layer, i.e. it lies along a side or a diagonal of
+one of the nested pentagons. The "without pentagasket" count recounts a round's
+crossings with those segments removed entirely, on the same point set.
 
 Exactness
 ---------
@@ -132,6 +129,7 @@ class State:
         self.birth = []      # round in which each point appeared
         self.layer = []      # pentagasket layer of each point, or -1
         self.layer_of = {}   # exact point -> layer, for layers not yet born
+        self.n_segments = 5  # segments drawn in the latest round (round 0: the sides)
 
     def add(self, p, birth):
         self.index[p] = len(self.pts)
@@ -149,9 +147,9 @@ class Round:
         self.new_points = 0        # points created in the round
         self.new_points_ng = 0     # ... using only non-gasket segments
         self.ng_points = []        # indices of the new points that need no gasket segment
-        self.segments = 0          # segments present (every pair of earlier points)
-        self.gasket_segments = 0
-        self.new_segments = 0      # segments added this round
+        self.segments = 0          # segments present (one per line through 2+ points)
+        self.gasket_segments = 0   # segments along a side or diagonal of a layer
+        self.new_segments = 0      # net change in segments from the previous round
         self.lines = []            # per line: dict (see step())
         self.n_directions = 0      # exact count of distinct line directions
         self.seconds = 0.0
@@ -179,7 +177,7 @@ def round_zero(st):
     for i in range(5):
         a, b = i, (i + 1) % 5
         L = line_key(st.pts[a], st.pts[b])
-        rd.lines.append(dict(key=L, pts=[a, b], ng=[], gasket_pairs=1))
+        rd.lines.append(dict(key=L, pts=[a, b], ng=[], gasket=True))
     rd.n_directions = 5
     return rd
 
@@ -199,53 +197,19 @@ def _group_lines(st, joined_pairs):
     return list(lines.items())
 
 
-def _ng_intervals(order, layer, joined):
-    """
-    Union of non-gasket segments on one line, as (first, last) index pairs of
-    maximal covered runs. `order` = point indices sorted along the line.
-    A gap between consecutive points a, a+1 is covered if some joined
-    non-gasket pair (u, v) has u <= a < v.
-    """
-    m = len(order)
-    covered = [False] * (m - 1)
-    for u in range(m):
-        for v in range(u + 1, m):
-            pu, pv = order[u], order[v]
-            if (min(pu, pv), max(pu, pv)) not in joined:
-                continue
-            if layer[pu] >= 0 and layer[pu] == layer[pv]:
-                continue
-            for a in range(u, v):
-                covered[a] = True
-    runs, start = [], None
-    for a in range(m - 1):
-        if covered[a] and start is None:
-            start = a
-        if not covered[a] and start is not None:
-            runs.append((order[start], order[a]))
-            start = None
-    if start is not None:
-        runs.append((order[start], order[m - 1]))
-    return runs
-
-
 def step(st, k, log=print):
     """Run round k on state st (points after round k-1). Mutates st."""
     t0 = time.time()
     rd = Round(k)
     N = len(st.pts)
 
-    # Segments present in round k: round 1 starts from the 5 sides only, but
-    # from round 1 on every pair of earlier points is joined.
-    all_pairs = list(combinations(range(N), 2))
-    joined = set(all_pairs)
-    rd.segments = len(all_pairs)
-    rd.new_segments = rd.segments - (5 if k == 1 else math.comb(len([b for b in st.birth if b < k - 1]), 2))
-    rd.gasket_segments = sum(1 for i, j in all_pairs if st.layer[i] >= 0 and st.layer[i] == st.layer[j])
-
-    groups = _group_lines(st, all_pairs)
+    # every pair of earlier points is joined; collinear pairs share one segment
+    groups = _group_lines(st, combinations(range(N), 2))
     Lc = len(groups)
-    log(f"  round {k}: {N} points, {rd.segments} segments on {Lc} lines")
+    rd.segments = Lc
+    rd.new_segments = Lc - st.n_segments
+    st.n_segments = Lc
+    log(f"  round {k}: {N} points, {rd.segments} segments")
 
     # exact direction ids (parallel lines share an id)
     dir_ids = {}
@@ -255,7 +219,7 @@ def step(st, k, log=print):
     D = np.empty((Lc, 2))
     LEN = np.empty(Lc)
     ng_full = np.zeros(Lc, dtype=bool)
-    ng_runs_f = {}     # line -> list of (t0, t1) for partially covered lines
+    ng_runs_f = {}     # gasket line -> [] (no non-gasket coverage)
     ng_runs = []
     pf = st.pf
     for li, (L, members) in enumerate(groups):
@@ -280,9 +244,9 @@ def step(st, k, log=print):
             ng_full[li] = True
             ng_runs.append([(order[0], order[-1])])
         else:
-            runs = _ng_intervals(order, st.layer, joined)
-            ng_runs.append(runs)
-            ng_runs_f[li] = [((pf[u] - p0) @ D[li], (pf[v] - p0) @ D[li]) for u, v in runs]
+            rd.gasket_segments += 1
+            ng_runs.append([])
+            ng_runs_f[li] = []
     rd.n_directions = len(dir_ids)
 
     # incidence codes (line, old point) for exact confirmation of matches
@@ -447,9 +411,7 @@ def step(st, k, log=print):
         pts_on = orders[li] + line_new[li]
         p0, d = P0[li], D[li]
         pts_on.sort(key=lambda p: (st.pf[p] - p0) @ d)
-        gp = sum(1 for u, v in combinations(orders[li], 2)
-                 if st.layer[u] >= 0 and st.layer[u] == st.layer[v])
-        rd.lines.append(dict(key=keys[li], pts=pts_on, ng=ng_runs[li], gasket_pairs=gp))
+        rd.lines.append(dict(key=keys[li], pts=pts_on, ng=ng_runs[li], gasket=not ng_full[li]))
 
     rd.seconds = time.time() - t0
     log(f"    -> {rd.new_points} new points ({rd.new_points_ng} without pentagasket), "
@@ -486,10 +448,10 @@ def run(rounds, use_cache=True, log=print):
 def main(argv):
     R = int(argv[1]) if len(argv) > 1 and argv[1].isdigit() else 2
     st, recs = run(R, use_cache="--fresh" not in argv)
-    print("\nround  points  new  new(no gasket)  segments  gasket segs  lines  directions")
+    print("\nround  points  new  new(no gasket)  segments  gasket segs  directions")
     for r in recs:
         print(f"{r.k:>5}  {r.n_points:>6}  {r.new_points:>5}  {r.new_points_ng:>14}  "
-              f"{r.segments:>8}  {r.gasket_segments:>11}  {len(r.lines):>5}  {r.n_directions:>10}")
+              f"{r.segments:>8}  {r.gasket_segments:>11}  {r.n_directions:>10}")
 
 
 if __name__ == "__main__":
