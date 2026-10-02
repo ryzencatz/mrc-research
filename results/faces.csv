@@ -1,0 +1,11 @@
+round,graph,corners,faces
+0,with_gasket,5,1
+1,with_gasket,3,10
+1,with_gasket,5,1
+2,with_gasket,3,45
+2,without_gasket,3,20
+3,with_gasket,3,815
+3,with_gasket,4,330
+3,without_gasket,3,730
+3,without_gasket,4,300
+3,without_gasket,5,20

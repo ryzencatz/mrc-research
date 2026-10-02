@@ -1,0 +1,9 @@
+round,points,new_points,new_points_without_gasket,segments,gasket_segments,lines,directions,directions_multiple_of_18deg,graph,V,E,components,bounded_faces,euler_ok,lambda2,lambda_max,eigs_in_Zphi_irrational,eigs_integer,n_eigs,min_angle_deg,min_point_distance,distinct_segment_lengths,phi_power_segments
+0,5,5,0,5,5,5,5,5,with_gasket,5,5,1,1,True,1.381966011,3.618033989,4,1,5,72,1.175570505,2,10
+0,5,5,0,5,5,5,5,5,without_gasket,0,0,0,0,True,0,0,0,0,0,72,1.175570505,2,10
+1,10,5,0,10,10,10,5,5,with_gasket,10,20,1,11,True,1.763932023,6.236067977,4,6,10,36,0.4490279766,2,10
+1,10,5,0,10,10,10,5,5,without_gasket,0,0,0,0,True,0,0,0,0,0,36,0.4490279766,2,10
+2,26,16,6,45,20,20,10,10,with_gasket,26,70,1,45,True,1.223110674,11.45298523,0,1,26,18,0.08575671258,5,40
+2,26,16,6,45,20,20,10,10,without_gasket,26,45,1,20,True,0.6627592801,11.11272162,0,1,26,18,0.08575671258,5,40
+3,741,715,675,325,30,100,50,10,with_gasket,741,1885,1,1145,True,0.05298171294,19.18252639,0,1,741,1.795236704,0.004170578582,35,70
+3,741,715,675,325,30,100,50,10,without_gasket,741,1790,1,1050,True,0.04433041474,19.17808856,0,1,741,1.795236704,0.004170578582,35,70
