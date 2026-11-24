@@ -31,6 +31,21 @@ The same code reproduces the exact regular-pentagon counts and graph statistics.
   The Laplacian spectrum is computed for graphs up to 1,000 vertices, so not for round 3 of a tiling type, which has about 37,000.
   It also has a table comparing all shapes, plus CSV export. A link such as `web/index.html#type=7&round=3` opens a type. Once a shape has been dragged, the link also carries it (`v=...`).
 
+## Laplacian spectrum and data downloads (visualizer)
+
+- **Laplacian section** (`web/live-spectral.js`). For each round, L = D − A of the arrangement graph:
+  - λ₂ (algebraic connectivity) and its multiplicity
+  - λmax, with the bounds Δ + 1 ≤ λmax ≤ max(d_u + d_v)
+  - checks: number of zero eigenvalues = number of components, and sum of eigenvalues = 2E
+  - number of spanning trees (matrix-tree theorem)
+  - a table of λ₂ and λmax across the rounds
+- **How it's computed.** Graphs with up to 1,000 vertices get the full decomposition, eigenvectors included.
+  Larger graphs (round 3 of a tiling type, about 37,000 vertices) get λmax from Lanczos iteration, and λ₂–λ₄ plus the Fiedler vector from Lanczos applied to the inverse of L (conjugate-gradient solves), each with a residual check.
+  This runs in a Web Worker and takes about 7 s per graph. On the regular pentagon it matches the exact spectrum from `analysis.py` (max |Δλ| ≈ 3e-13).
+- **Eigenvectors on the drawing.** Colour the points by the Fiedler vector, the λmax eigenvector, or any eigenvector k of a small graph.
+- **The pentagon as a 5-cycle.** Checks λ_k = 2 − 2cos(2πk/5) (0, 3 − φ, 2 + φ, each nonzero value twice) against round 0, which is C₅ for every pentagon.
+- **Download data (CSV).** All shapes × rounds × with/without gasket (counts, geometry, graph stats, eigenvalues, angles and sides); this shape per round; and, for the current round, its points, its eigenvalues (with a + bφ forms and residuals) and its eigenvectors.
+
 ## Rules used
 
 - **Round 0** is the 5 vertices and the 5 sides.

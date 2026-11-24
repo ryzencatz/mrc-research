@@ -273,7 +273,47 @@
     });
   }
 
-  const api = { geometry, graph, symEigenvalues, SPECTRUM_MAX_V };
+  // Laplacian of the round's arrangement graph as CSR on the vertices it
+  // touches: {off, nbr, ids (point index of each row), maxDeg, edgeBound,
+  // E, comps, partial}. Graphs above denseMax with several components are cut
+  // down to the largest one (partial = true), because the sparse solver needs
+  // a connected graph.
+  function laplacianCSR(rd, withoutGasket, denseMax) {
+    const adj = new Map();
+    const add = (a, b) => { let x = adj.get(a); if (!x) adj.set(a, x = []); x.push(b); };
+    let E = 0;
+    for (const L of rd.lines) {
+      if (withoutGasket && L.gasket.length) continue;
+      for (let i = 0; i + 1 < L.pts.length; i++) { add(L.pts[i], L.pts[i + 1]); add(L.pts[i + 1], L.pts[i]); E++; }
+    }
+    let ids = [...adj.keys()].sort((a, b) => a - b);
+    // components
+    const comp = new Map();
+    let comps = 0, bestSize = 0, best = -1;
+    for (const s of ids) {
+      if (comp.has(s)) continue;
+      const stack = [s];
+      comp.set(s, comps);
+      let size = 0;
+      while (stack.length) { const v = stack.pop(); size++; for (const w of adj.get(v)) if (!comp.has(w)) { comp.set(w, comps); stack.push(w); } }
+      if (size > bestSize) { bestSize = size; best = comps; }
+      comps++;
+    }
+    const partial = comps > 1 && ids.length > denseMax;
+    if (partial) ids = ids.filter((v) => comp.get(v) === best);
+    const ix = new Map(ids.map((v, i) => [v, i]));
+    const off = new Int32Array(ids.length + 1), nbr = [];
+    let maxDeg = 0, edgeBound = 0;
+    ids.forEach((v, i) => {
+      const ns = adj.get(v);
+      maxDeg = Math.max(maxDeg, ns.length);
+      for (const w of ns) { nbr.push(ix.get(w)); edgeBound = Math.max(edgeBound, ns.length + adj.get(w).length); }
+      off[i + 1] = nbr.length;
+    });
+    return { off, nbr: Int32Array.from(nbr), ids: Int32Array.from(ids), maxDeg, edgeBound, E, comps, partial };
+  }
+
+  const api = { geometry, graph, symEigenvalues, laplacianCSR, SPECTRUM_MAX_V };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.LiveAnalysis = api;
 })(typeof window !== "undefined" ? window : globalThis);

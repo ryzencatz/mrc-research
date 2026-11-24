@@ -201,6 +201,14 @@
   #typesTable td.thumb { width: 34px; padding: 2px 4px; }
   #typesTable svg { display: block; width: 30px; height: 26px; }
   #typesTable .pending { color: var(--muted); }
+  .checkline { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--ink2); margin-top: 10px; }
+  .checkline input { margin-top: 2px; }
+  .vecpick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+  .vecpick input[type=range] { flex: 1; min-width: 120px; accent-color: var(--s1); }
+  .formula { font-size: 15px; font-family: "Times New Roman", serif; font-style: italic; margin: 6px 0 8px; }
+  .formula sub { font-size: 0.7em; }
+  .sw-grad { width: 34px; height: 8px; border-radius: 4px; display: inline-block;
+             background: linear-gradient(90deg, var(--s1), var(--grid), var(--s2)); }
 
   @media (max-width: 900px) {
     .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; height: auto; }
@@ -270,10 +278,6 @@
         <tbody></tbody>
       </table>
       <p class="note" id="typeLayersNote"></p>
-      <div class="actions">
-        <button id="csvSummary">Download summary CSV</button>
-        <button id="csvPoints">Download points CSV</button>
-      </div>
     </section>
 
     <section>
@@ -295,6 +299,20 @@
         <tbody></tbody>
       </table>
       <p class="note">Round 2 has 45 points for every type shown here (26 for the regular pentagon). Each type is counted at its current shape, so a row changes when you drag that type. Free params are the shape’s degrees of freedom once size, position and rotation are factored out. Click a row to open it.</p>
+    </section>
+
+    <section>
+      <h2>Download data (CSV)</h2>
+      <div class="actions">
+        <button id="csvAll">All shapes, every round</button>
+        <button id="csvSummary">This shape, per round</button>
+        <button id="csvPoints">Points · this round</button>
+        <button id="csvEigs">Eigenvalues · this round</button>
+        <button id="csvVecs">Eigenvectors · this round</button>
+      </div>
+      <label class="checkline"><input type="checkbox" id="csvAllR3"> In “All shapes”, also compute λ₂ and λmax for round 3 of the 15 types (about 7 s per graph, roughly 3–4 minutes in total)</label>
+      <p class="note" id="csvStatus"></p>
+      <p class="note">“All shapes” has one row per shape, round and graph (with and without the pentagasket): counts, geometry, graph stats and Laplacian eigenvalues. The tiling types use their current shapes. “This round” files follow the round and gasket setting on screen.</p>
     </section>
 
     <section class="regular-only">
@@ -355,6 +373,16 @@
       <h2 id="graphTitle">Arrangement graph</h2>
       <div id="graphBody"></div>
     </section>
+
+    <section>
+      <h2 id="specTitle">Laplacian matrix and eigenvalues</h2>
+      <div id="specBody"></div>
+    </section>
+
+    <section>
+      <h2>The pentagon as a 5-cycle</h2>
+      <div id="cycleBody"></div>
+    </section>
   </aside>
 </div>
 <div class="tip" id="tip"></div>
@@ -363,6 +391,7 @@
 <script src="live-engine.js"></script>
 <script src="live-analysis.js"></script>
 <script src="tile-types.js"></script>
+<script src="live-spectral.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
