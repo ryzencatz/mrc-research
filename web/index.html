@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Meta-Intersecting Pentagon</title>
+<title>Meta-Intersecting Pentagons</title>
 <style>
   :root {
     color-scheme: light;
@@ -179,6 +179,29 @@
   .prose { font-size: 12.5px; color: var(--ink2); margin: 0 0 8px; }
   #layerTable tbody tr.future td { color: var(--muted); }
 
+  /* ---------- shapes: regular pentagon or one of the 15 tiling types ---------- */
+  body.mode-type .regular-only { display: none; }
+  body:not(.mode-type) .type-only { display: none; }
+  .shape-pick { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+  select {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; min-height: 30px;
+  }
+  canvas.over-vertex { cursor: move; }
+  .cond { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 13px; }
+  .cond li { display: flex; gap: 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
+  .cond .ok { color: var(--good); font-weight: 600; }
+  .cond .bad { color: var(--critical); font-weight: 600; }
+  .cond .derived { color: var(--ink2); }
+  .cond .err { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .figure-conds { font-size: 13.5px; font-weight: 600; margin: 0 0 8px; line-height: 1.6; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  #typesTable { font-size: 12.5px; }
+  #typesTable td, #typesTable th { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
+  #typesTable td.thumb { width: 34px; padding: 2px 4px; }
+  #typesTable svg { display: block; width: 30px; height: 26px; }
+  #typesTable .pending { color: var(--muted); }
+
   @media (max-width: 900px) {
     .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; height: auto; }
     .canvas-wrap { height: min(70vh, 560px); flex: none; margin: 0 16px 16px; }
@@ -195,12 +218,15 @@
 <body>
 <div class="app">
   <header>
-    <h1>Meta-intersecting pentagon</h1>
-    <p>Regular pentagon · every point exact in Q(√5) · collinear points share one segment</p>
+    <h1>Meta-intersecting pentagons</h1>
+    <p id="subtitle">Regular pentagon · every point exact in Q(√5) · collinear points share one segment</p>
   </header>
 
   <div class="stage">
     <div class="toolbar">
+      <label class="shape-pick">Shape
+        <select id="shape" aria-label="Shape"></select>
+      </label>
       <div class="rounds">
         <button id="prev" aria-label="Previous round">◀</button>
         <input id="slider" type="range" min="0" max="3" step="1" value="0" aria-label="Round">
@@ -212,6 +238,7 @@
         <span class="track"></span>
         <span>Show pentagaskets</span>
       </label>
+      <button id="resetShape" class="type-only" title="Back to the starting shape for this type">Reset shape</button>
       <div class="zoom">
         <button id="zoomIn" aria-label="Zoom in">+</button>
         <button id="zoomOut" aria-label="Zoom out">−</button>
@@ -221,11 +248,34 @@
     <div class="canvas-wrap" id="wrap">
       <canvas id="cv"></canvas>
       <div class="legend" id="legend"></div>
-      <div class="hint">Scroll to zoom · drag to pan · ←/→ rounds · G toggles gasket</div>
+      <div class="hint" id="hint">Scroll to zoom · drag to pan · ←/→ rounds · G toggles gasket</div>
     </div>
   </div>
 
   <aside>
+    <section class="type-only" id="typeSection">
+      <h2 id="typeTitle">Type</h2>
+      <p class="figure-conds" id="typeConds"></p>
+      <ul class="cond" id="typeChecks"></ul>
+      <div class="tiles" style="margin-top:10px" id="typeTiles"></div>
+      <h3>Angles and sides</h3>
+      <table class="mini" id="typeTable">
+        <thead><tr><th>Vertex</th><th>Angle</th><th>Side</th><th>Length</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note">Sides a = EA, b = AB, c = BC, d = CD, e = DE, scaled so the shortest side is 1.</p>
+      <h3>Nested pentagons (crossings of the diagonals)</h3>
+      <table class="mini" id="typeLayers">
+        <thead><tr><th>Layer</th><th>Round</th><th>Area</th><th>Smaller than<br>previous by</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note" id="typeLayersNote"></p>
+      <div class="actions">
+        <button id="csvSummary">Download summary CSV</button>
+        <button id="csvPoints">Download points CSV</button>
+      </div>
+    </section>
+
     <section>
       <h2>Intersections per round</h2>
       <table>
@@ -235,9 +285,19 @@
         <tbody id="countsBody"></tbody>
       </table>
       <p class="note">“Without” recounts the round’s crossings after removing every segment that lies along a side or diagonal of one of the nested pentagons, on the same point set.</p>
+      <p class="note type-only" id="liveNote"></p>
     </section>
 
     <section>
+      <h2>All shapes compared</h2>
+      <table id="typesTable">
+        <thead><tr><th></th><th>Shape</th><th>Free<br>params</th><th>Points<br>R3</th><th>Segs<br>R3</th><th>New R3<br>without</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note">Round 2 has 45 points for every type shown here (26 for the regular pentagon). Each type is counted at its current shape, so a row changes when you drag that type. Free params are the shape’s degrees of freedom once size, position and rotation are factored out. Click a row to open it.</p>
+    </section>
+
+    <section class="regular-only">
       <h2>Points and segments per round</h2>
       <div class="chart" id="growthChart"></div>
       <div class="key">
@@ -248,7 +308,7 @@
       <p class="note" id="growthNote"></p>
     </section>
 
-    <section>
+    <section class="regular-only">
       <h2>Best-fit equations</h2>
       <div class="chart" id="fitChart"></div>
       <div class="key">
@@ -261,7 +321,7 @@
       <p class="note" id="fitNote"></p>
     </section>
 
-    <section>
+    <section class="regular-only">
       <h2>Nested pentagons</h2>
       <table id="layerTable">
         <thead><tr><th>Layer</th><th>Appears</th><th>Side</th><th>Diagonal</th><th>Smaller<br>than previous</th></tr></thead>
@@ -270,7 +330,7 @@
       <p class="note">Measured on the computed vertices; the outer pentagon has circumradius 1. Hover a row to outline that pentagon.</p>
     </section>
 
-    <section>
+    <section class="regular-only">
       <h2>The golden ratio</h2>
       <ul class="checks" id="goldenChecks"></ul>
       <h3>From one pentagon to the next</h3>
@@ -300,6 +360,9 @@
 <div class="tip" id="tip"></div>
 
 <script src="data.js"></script>
+<script src="live-engine.js"></script>
+<script src="live-analysis.js"></script>
+<script src="tile-types.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -7,15 +7,51 @@
     document.body.innerHTML = "<p style='padding:20px'>web/data.js is missing. Run <code>python export.py</code> first.</p>";
     return;
   }
-  const P = D.points;           // [x, y, birthRound, gasketLayer]
-  const R = D.rounds;
-  const maxRound = R.length - 1;
+  // The dataset on screen: the exact regular pentagon from data.js, or a live
+  // (float) computation for one of the 15 tiling types. Both have the same shape.
+  let P = D.points;             // [x, y, birthRound, gasketLayer]
+  let R = D.rounds;
+  let maxRound = R.length - 1;
 
   const $ = (id) => document.getElementById(id);
   const cv = $("cv"), wrap = $("wrap"), tip = $("tip");
   const ctx = cv.getContext("2d");
-  const state = { k: 0, gasket: true, scale: 1, ox: 0, oy: 0, hover: -1, layerHi: -1 };
+  const state = { k: 0, gasket: true, scale: 1, ox: 0, oy: 0, hover: -1, layerHi: -1,
+                  shape: 0, hoverVertex: -1 };      // shape 0 = regular, 1..15 = tiling type
   const G = D.golden, R4 = D.round4, FIT = D.fits;
+
+  // ---------------------------------------------------------- tiling types ---
+  const TT = window.TileTypes, LE = window.LiveEngine, LA = window.LiveAnalysis;
+  const LIVE_ROUNDS = 3;
+  const shapes = {};            // type n -> 10 coords [xA, yA, ..., xE, yE] (world units)
+  const typeInfo = {};          // type n -> {dof}
+  const summaries = {};         // type n -> per-round counts at the current shape
+  const isType = () => state.shape > 0;
+  const curType = () => TT.TYPES[state.shape - 1];
+  const vertsOf = (x) => [0, 1, 2, 3, 4].map((i) => [x[2 * i], x[2 * i + 1]]);
+  TT.TYPES.forEach((T) => {
+    shapes[T.n] = TT.initial(T);
+    typeInfo[T.n] = TT.dof(T, shapes[T.n]);
+  });
+
+  // Run the engine on a normalised copy (centred, circumradius 1) so its
+  // absolute tolerances mean the same at any zoom or size, then map back.
+  function computeLive(x, rounds) {
+    const v = vertsOf(x);
+    const cx = v.reduce((s, p) => s + p[0], 0) / 5, cy = v.reduce((s, p) => s + p[1], 0) / 5;
+    const r = Math.max(...v.map((p) => Math.hypot(p[0] - cx, p[1] - cy)));
+    const out = LE.compute(v.map((p) => [(p[0] - cx) / r, (p[1] - cy) / r]), rounds);
+    for (const p of out.points) { p[0] = p[0] * r + cx; p[1] = p[1] * r + cy; }
+    out.layers = out.layers.map((L) => L.map((p) => [p[0] * r + cx, p[1] * r + cy]));
+    return out;
+  }
+  let live = null;
+  function recomputeLive() {
+    live = computeLive(shapes[state.shape], LIVE_ROUNDS);
+    P = live.points; R = live.rounds; maxRound = R.length - 1;
+    summaries[state.shape] = R.map((rd) => rd.counts);
+  }
+  function useRegular() { P = D.points; R = D.rounds; maxRound = R.length - 1; live = null; }
 
   const fmt = (n) => n.toLocaleString("en-US");
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -23,10 +59,12 @@
   // ------------------------------------------------------------ view ---
   function fit() {
     const w = wrap.clientWidth, h = wrap.clientHeight;
-    // pentagon of circumradius 1, vertex up: y in [-0.809, 1]
-    state.scale = 0.46 * Math.min(w, h / 0.95);
-    state.ox = w / 2;
-    state.oy = h / 2 + state.scale * 0.0955;
+    // fit the outer pentagon (the first 5 points) with a margin
+    const xs = P.slice(0, 5).map((p) => p[0]), ys = P.slice(0, 5).map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    state.scale = 0.86 * Math.min(w / (x1 - x0), h / (y1 - y0));
+    state.ox = w / 2 - state.scale * (x0 + x1) / 2;
+    state.oy = h / 2 + state.scale * (y0 + y1) / 2;
   }
   const sx = (x) => state.ox + x * state.scale;
   const sy = (y) => state.oy - y * state.scale;
@@ -80,26 +118,29 @@
     // that only exist because of gasket segments are drawn as rings
     const n = rd.counts.points;
     const ngSet = state.gasket ? null : new Set(rd.ng_points);
-    const r = n > 200 ? 2 : 3.5;
+    const huge = n > 5000;                       // tens of thousands of points: square dots
+    const r = huge ? 1.2 : n > 200 ? 2 : 3.5;
+    const W = w, H = h;
+    const dot = huge
+      ? (i, rr) => { const X = sx(P[i][0]), Y = sy(P[i][1]); if (X > -2 && X < W + 2 && Y > -2 && Y < H + 2) ctx.rect(X - rr, Y - rr, 2 * rr, 2 * rr); }
+      : (i, rr) => { ctx.moveTo(sx(P[i][0]) + rr, sy(P[i][1])); ctx.arc(sx(P[i][0]), sy(P[i][1]), rr, 0, 2 * Math.PI); };
     ctx.fillStyle = ink;
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
       if (P[i][2] === state.k && state.k > 0) continue;
-      ctx.moveTo(sx(P[i][0]) + r, sy(P[i][1]));
-      ctx.arc(sx(P[i][0]), sy(P[i][1]), r, 0, 2 * Math.PI);
+      dot(i, r);
     }
     ctx.fill();
     if (state.k > 0) {
-      const rn = r + 0.5;
+      const rn = huge ? r : r + 0.5;
       ctx.fillStyle = s1;
       ctx.beginPath();
       for (let i = 0; i < n; i++) {
         if (P[i][2] !== state.k || (ngSet && !ngSet.has(i))) continue;
-        ctx.moveTo(sx(P[i][0]) + rn, sy(P[i][1]));
-        ctx.arc(sx(P[i][0]), sy(P[i][1]), rn, 0, 2 * Math.PI);
+        dot(i, rn);
       }
       ctx.fill();
-      if (ngSet) {
+      if (ngSet && !huge) {
         ctx.strokeStyle = s1;
         ctx.lineWidth = 1.2;
         ctx.beginPath();
@@ -117,7 +158,8 @@
       const vs = [];
       for (let i = 0; i < P.length; i++) if (P[i][3] === state.layerHi) vs.push(P[i]);
       if (vs.length === 5) {
-        vs.sort((p, q) => Math.atan2(p[1], p[0]) - Math.atan2(q[1], q[0]));
+        const mx = vs.reduce((t, p) => t + p[0], 0) / 5, my = vs.reduce((t, p) => t + p[1], 0) / 5;
+        vs.sort((p, q) => Math.atan2(p[1] - my, p[0] - mx) - Math.atan2(q[1] - my, q[0] - mx));
         ctx.strokeStyle = s2;
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -126,6 +168,8 @@
         ctx.stroke();
       }
     }
+
+    if (isType()) drawLabels(ink, s1);
 
     // hovered point ring
     if (state.hover >= 0) {
@@ -136,6 +180,42 @@
       ctx.arc(sx(p[0]), sy(p[1]), r + 4, 0, 2 * Math.PI);
       ctx.stroke();
     }
+  }
+
+  // vertex labels A-E, side labels a-e and drag handles for a tiling type
+  function drawLabels(ink, s1) {
+    const v = vertsOf(shapes[state.shape]);
+    const cx = v.reduce((t, p) => t + p[0], 0) / 5, cy = v.reduce((t, p) => t + p[1], 0) / 5;
+    const draggable = typeInfo[state.shape].dof > 0;
+    ctx.font = "600 13px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const out = (x, y, d) => {               // screen point d px outward from the centre
+      const X = sx(x), Y = sy(y), ux = X - sx(cx), uy = Y - sy(cy), l = Math.hypot(ux, uy) || 1;
+      return [X + ux / l * d, Y + uy / l * d];
+    };
+    v.forEach((p, i) => {
+      if (draggable) {
+        ctx.beginPath();
+        ctx.arc(sx(p[0]), sy(p[1]), i === state.hoverVertex ? 8 : 6, 0, 2 * Math.PI);
+        ctx.fillStyle = css("--surface");
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = s1;
+        ctx.stroke();
+      }
+      const [X, Y] = out(p[0], p[1], 18);
+      ctx.fillStyle = ink;
+      ctx.fillText("ABCDE"[i], X, Y);
+    });
+    ctx.font = "italic 12px system-ui, -apple-system, sans-serif";
+    ctx.fillStyle = css("--ink2");
+    // side a = EA, b = AB, c = BC, d = CD, e = DE
+    "abcde".split("").forEach((name, k) => {
+      const p = v[(k + 4) % 5], q = v[k];
+      const [X, Y] = out((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, 14);
+      ctx.fillText(name, X, Y);
+    });
   }
 
   // ------------------------------------------------------------ legend ---
@@ -168,18 +248,31 @@
     return `<div class="tile"><div class="lbl">${label}</div><div class="val">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
   }
 
+  // live rounds compute their geometry and graph stats on first use
+  const geomOf = (rd) => rd.geom || (rd.geom = LA.geometry(P, rd));
+  function graphOf(rd, key) {
+    rd.graph = rd.graph || {};
+    return rd.graph[key] || (rd.graph[key] = LA.graph(P, rd, key === "without"));
+  }
+
   function geometry() {
-    const rd = R[state.k], g = rd.geom, c = rd.counts;
+    const rd = R[state.k], g = geomOf(rd), c = rd.counts;
     $("geomTitle").textContent = `Geometry · round ${state.k}`;
+    const last = isType()
+      ? tile("Points where ≥ 3 lines meet", fmt(g.multi), `up to ${g.max_lines} lines through one point`)
+      : tile("φ-power lengths", fmt(g.phi_power_segments),
+             `side × φ^n, n ∈ {${g.phi_power_values.join(", ")}}`);
     $("geomTiles").innerHTML =
       tile("New intersections", state.k ? fmt(state.gasket ? c.new : c.new_ng) : "–",
            state.k ? (state.gasket ? `${fmt(c.new_ng)} without gasket` : `${fmt(c.new)} with gasket`) : "") +
-      tile("Lines drawn", fmt(c.lines), `${g.n_dir} directions · ${g.n_dir_mult18} at multiples of 18°`) +
+      tile("Lines drawn", fmt(c.lines), g.n_dir_mult18 == null ? `${g.n_dir} directions`
+           : `${g.n_dir} directions · ${g.n_dir_mult18} at multiples of 18°`) +
       tile("Smallest angle", `${g.min_angle.toPrecision(4)}°`, "between lines through one point") +
-      tile("Closest two points", g.min_dist.toPrecision(3), "circumradius = 1") +
+      tile("Closest two points", g.min_dist.toPrecision(3), isType()
+           ? (g.near_pairs ? `${fmt(g.near_pairs)} pair${g.near_pairs > 1 ? "s" : ""} closer than 10⁻⁶` : "outer pentagon at its drawn size")
+           : "circumradius = 1") +
       tile("Segment lengths", fmt(g.n_lengths), `distinct, over ${fmt(g.n_segments)} segments`) +
-      tile("φ-power lengths", fmt(g.phi_power_segments),
-           `side × φ^n, n ∈ {${g.phi_power_values.join(", ")}}`);
+      last;
     histogram($("dirChart"), g.dir_hist, "lines", "°");
     histogram($("angChart"), g.angle_hist, "angles", "°");
   }
@@ -267,7 +360,7 @@
 
   function graphPanel() {
     const key = state.gasket ? "with" : "without";
-    const g = R[state.k].graph[key];
+    const g = graphOf(R[state.k], key);
     $("graphTitle").textContent = `Arrangement graph · round ${state.k} · ${state.gasket ? "with" : "without"} pentagasket`;
     const body = $("graphBody");
     if (!g.E) {
@@ -276,27 +369,24 @@
     }
     const euler = g.euler_ok
       ? `<span class="status ok">✓ Euler check holds: V − E + F = C</span>`
-      : `<span class="status bad">✕ Euler check fails</span>`;
+      : `<span class="status bad">✕ Euler check fails${isType() ? ": two crossings closer than the 10⁻¹¹ tolerance were probably merged, so treat this round's counts as approximate" : ""}</span>`;
     const maxF = Math.max(1, ...Object.values(g.faces));
     const faces = Object.entries(g.faces).map(([c, m]) =>
       `<tr><td>${c}-gon</td><td>${fmt(m)}</td><td style="width:55%"><span class="bar" style="width:${(100 * m / maxF).toFixed(1)}%"></span></td></tr>`).join("");
     const maxD = Math.max(...Object.values(g.degrees));
     const degs = Object.entries(g.degrees).map(([d, m]) =>
       `<tr><td>${d}</td><td>${fmt(m)}</td><td style="width:55%"><span class="bar" style="width:${(100 * m / maxD).toFixed(1)}%"></span></td></tr>`).join("");
+    if (g.spectrum_skipped) {
+      body.innerHTML = graphSummary(g, euler, faces, degs) + `
+        <h3>Laplacian spectrum (L = D − A)</h3>
+        <p class="empty">Skipped: the graph has ${fmt(g.V)} vertices, and the browser diagonalises up to ${fmt(g.spectrum_skipped)}. Earlier rounds have a full spectrum.</p>`;
+      return;
+    }
     const phiEigs = g.eigs.filter((e) => e[2] && e[2].includes("φ"));
     const phiList = phiEigs.length
       ? `<ul class="eig-list">${phiEigs.map(([v, m, f]) => `<li>${v.toFixed(6)} = ${f}${m > 1 ? ` (×${m})` : ""}</li>`).join("")}</ul>`
       : `<p class="empty">None. No eigenvalue lies in Q(√5) apart from ${g.int_count === 1 ? "0" : "integers"}.</p>`;
-    body.innerHTML = `
-      <div class="tiles">
-        ${tile("Vertices · edges", `${fmt(g.V)} · ${fmt(g.E)}`, `${g.C} component${g.C > 1 ? "s" : ""}`)}
-        ${tile("Bounded faces", fmt(g.F), g.nonsimple ? `${g.nonsimple} non-simple` : "")}
-      </div>
-      <p style="margin:8px 0 0">${euler}</p>
-      <h3>Faces by number of corners</h3>
-      ${faces ? `<table class="mini"><tbody>${faces}</tbody></table>` : `<p class="empty">No bounded faces: the graph has no cycles${g.C === 1 ? " (it is a tree)" : ""}.</p>`}
-      <h3>Degree distribution</h3>
-      <table class="mini"><thead><tr><th>Degree</th><th>Vertices</th><th></th></tr></thead><tbody>${degs}</tbody></table>
+    body.innerHTML = graphSummary(g, euler, faces, degs) + `
       <h3>Laplacian spectrum (L = D − A)</h3>
       <div class="tiles">
         ${tile("λ₂ (algebraic connectivity)", g.lambda2.toPrecision(5))}
@@ -309,6 +399,19 @@
     spectrumChart($("specChart"), g.eigs);
   }
 
+
+  function graphSummary(g, euler, faces, degs) {
+    return `
+      <div class="tiles">
+        ${tile("Vertices · edges", `${fmt(g.V)} · ${fmt(g.E)}`, `${g.C} component${g.C > 1 ? "s" : ""}`)}
+        ${tile("Bounded faces", fmt(g.F), g.nonsimple ? `${g.nonsimple} non-simple` : "")}
+      </div>
+      <p style="margin:8px 0 0">${euler}</p>
+      <h3>Faces by number of corners</h3>
+      ${faces ? `<table class="mini"><tbody>${faces}</tbody></table>` : `<p class="empty">No bounded faces: the graph has no cycles${g.C === 1 ? " (it is a tree)" : ""}.</p>`}
+      <h3>Degree distribution</h3>
+      <table class="mini"><thead><tr><th>Degree</th><th>Vertices</th><th></th></tr></thead><tbody>${degs}</tbody></table>`;
+  }
 
   // ------------------------------------------------------------ growth ---
   // Points and segments per round on a log scale, actual counts joined by lines.
@@ -524,28 +627,226 @@
     showTip(ev, `<b>Point #${best}</b><br>Born in round ${p[2]}${layer}${via}<br>(${p[0].toFixed(6)}, ${p[1].toFixed(6)})`);
   }
 
+  // ------------------------------------------------------------ type panel ---
+  const PHI4 = ((1 + Math.sqrt(5)) / 2) ** 4;
+  function polyArea(v) {
+    let a = 0;
+    for (let i = 0; i < v.length; i++) a += v[i][0] * v[(i + 1) % v.length][1] - v[(i + 1) % v.length][0] * v[i][1];
+    return Math.abs(a) / 2;
+  }
+
+  function typePanel() {
+    if (!isType()) return;
+    const T = curType(), x = shapes[T.n], m = TT.measure(x), info = typeInfo[T.n];
+    $("typeTitle").textContent = `Type ${T.n} · ${T.by}`;
+    $("typeConds").innerHTML = T.shown.join("<br>");
+    const res = TT.residual(T, x);
+    $("typeChecks").innerHTML = T.eq.map(([label], i) => {
+      const err = Math.abs(res[i]), ok = err < 1e-9;
+      return `<li><span class="${ok ? "ok" : "bad"}">${ok ? "✓" : "✕"}</span><span>${label}</span>` +
+             `<span class="err">residual ${err === 0 ? "0" : err.toExponential(0)}</span></li>`;
+    }).join("") + (T.derived || []).map(([label, f]) =>
+      `<li><span class="derived">⇒</span><span>${label}</span><span class="err">now ${f(m.ang).toFixed(4)}°</span></li>`).join("");
+    $("typeTiles").innerHTML =
+      tile("Free parameters", info.dof, info.dof > 0
+        ? `drag any vertex to explore the ${info.dof === 1 ? "1-parameter family" : `${info.dof}-parameter family`}`
+        : "rigid: only one shape, so its vertices can’t be dragged") +
+      tile("Conditions", T.eq.length, `${info.rank} independent, on 6 shape parameters`);
+    const shortest = Math.min(...Object.values(m.s));
+    $("typeTable").querySelector("tbody").innerHTML = "ABCDE".split("").map((V, i) => {
+      const side = "abcde"[i];
+      return `<tr><td>${V}</td><td>${m.ang[V].toFixed(4)}°</td><td>${side}</td><td>${(m.s[side] / shortest).toFixed(4)}</td></tr>`;
+    }).join("");
+    const layers = live.layers.slice(0, LIVE_ROUNDS + 2), a0 = polyArea(layers[0]);
+    $("typeLayers").querySelector("tbody").innerHTML = layers.map((L, j) => {
+      const a = polyArea(L), prev = j ? polyArea(layers[j - 1]) / a : null;
+      return `<tr data-layer="${j}" class="${j <= state.k ? "" : "future"}"><td>P${j}</td><td>${j}</td>` +
+             `<td>${(a / a0).toPrecision(5)}</td><td>${prev ? `×${prev.toFixed(4)}` : "–"}</td></tr>`;
+    }).join("");
+    $("typeLayersNote").textContent =
+      `Areas relative to P0. For the regular pentagon every step is ×φ⁴ ≈ ${PHI4.toFixed(4)}. Area ratios don’t change under ` +
+      `affine maps, so a different ratio means this pentagon is not an affine image of the regular one. Hover a row to outline that layer.`;
+    $("liveNote").textContent =
+      `Type ${T.n} is computed in the browser in floating point, so it updates while you drag. Crossings closer than 10⁻¹¹ ` +
+      `count as one point (true concurrences agree to about 10⁻¹³), and a point within 10⁻¹¹ of a line counts as on it. ` +
+      `The same code reproduces the exact regular-pentagon counts. Genuinely distinct crossings can come within about 10⁻⁹ ` +
+      `of each other in round 3; if a shape ever brings two below 10⁻¹¹, they merge and the Euler check below flags it.`;
+  }
+
+  // ------------------------------------------------------- all-types table ---
+  function thumb(v) {
+    const xs = v.map((p) => p[0]), ys = v.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const k = Math.min(26 / (x1 - x0), 22 / (y1 - y0));
+    const pts = v.map((p) => `${(15 + (p[0] - (x0 + x1) / 2) * k).toFixed(1)},${(13 - (p[1] - (y0 + y1) / 2) * k).toFixed(1)}`).join(" ");
+    return `<svg viewBox="0 0 30 26" aria-hidden="true"><polygon points="${pts}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+  }
+  function typesTable() {
+    const rows = [[0, "Regular", D.points.slice(0, 5), 0, D.rounds.map((r) => r.counts)]]
+      .concat(TT.TYPES.map((T) => [T.n, `Type ${T.n}`, vertsOf(shapes[T.n]), typeInfo[T.n].dof, summaries[T.n]]));
+    $("typesTable").querySelector("tbody").innerHTML = rows.map(([n, name, v, dof, c]) => {
+      const cell = (fn) => (c ? fmt(fn(c)) : `<span class="pending">…</span>`);
+      return `<tr data-shape="${n}" class="${n === state.shape ? "current" : ""}"><td class="thumb">${thumb(v)}</td><td>${name}</td><td>${dof}</td>` +
+        `<td>${cell((c) => c[3].points)}</td><td>${cell((c) => c[3].segments)}</td><td>${cell((c) => c[3].new_ng)}</td></tr>`;
+    }).join("");
+  }
+  // fill in the other types' rows in the background, one per tick
+  function fillSummaries() {
+    const T = TT.TYPES.find((t) => !summaries[t.n]);
+    if (!T) return;
+    summaries[T.n] = computeLive(shapes[T.n], LIVE_ROUNDS).rounds.map((rd) => rd.counts);
+    typesTable();
+    setTimeout(fillSummaries, 0);
+  }
+
+  // ---------------------------------------------------------------- csv ---
+  function download(name, text) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const shapeSlug = () => (isType() ? `type${state.shape}` : "regular");
+  function csvSummary() {
+    const v = vertsOf(isType() ? shapes[state.shape] : D.points.slice(0, 5).flatMap((p) => [p[0], p[1]]));
+    const m = TT.measure(v.flat());
+    const head = ["shape", "round", "points", "new_points", "new_points_without_gasket", "segments", "gasket_segments",
+      "directions", "free_parameters"].concat("ABCDE".split("").flatMap((V) => [`x${V}`, `y${V}`]),
+      "ABCDE".split("").map((V) => `angle_${V}_deg`), "abcde".split("").map((e) => `side_${e}`));
+    const rows = R.map((rd) => {
+      const c = rd.counts;
+      return [isType() ? `type ${state.shape}` : "regular", rd.k, c.points, rd.k ? c.new : "", rd.k ? c.new_ng : "",
+        c.segments, c.gasket_segments, c.directions, isType() ? typeInfo[state.shape].dof : 0]
+        .concat(v.flatMap((p) => [p[0].toFixed(12), p[1].toFixed(12)]),
+          "ABCDE".split("").map((V) => m.ang[V].toFixed(10)), "abcde".split("").map((e) => m.s[e].toFixed(12)));
+    });
+    download(`${shapeSlug()}_summary.csv`, [head].concat(rows).map((r) => r.join(",")).join("\n") + "\n");
+  }
+  function csvPoints() {
+    const rd = R[state.k], ng = new Set(rd.ng_points), n = rd.counts.points;
+    const lines = ["index,x,y,birth_round,gasket_layer,new_this_round_without_gasket"];
+    for (let i = 0; i < n; i++) {
+      const p = P[i];
+      lines.push([i, p[0].toFixed(12), p[1].toFixed(12), p[2], p[3], p[2] === state.k && state.k > 0 ? (ng.has(i) ? 1 : 0) : ""].join(","));
+    }
+    download(`${shapeSlug()}_round${state.k}_points.csv`, lines.join("\n") + "\n");
+  }
+
   // ------------------------------------------------------------ update ---
+  function writeHash() {
+    const parts = [];
+    if (isType()) {
+      parts.push(`type=${state.shape}`);
+      const x = shapes[state.shape], x0 = TT.initial(curType());
+      if (x.some((v, i) => Math.abs(v - x0[i]) > 1e-12)) parts.push(`v=${x.map((v) => v.toFixed(15)).join(",")}`);
+    }
+    parts.push(`round=${state.k}`, `gasket=${state.gasket ? 1 : 0}`);
+    history.replaceState(null, "", "#" + parts.join("&"));
+  }
   function setRound(k) {
     state.k = Math.max(0, Math.min(maxRound, k));
     state.hover = -1;
+    $("slider").max = maxRound;
     $("slider").value = state.k;
     $("roundLabel").textContent = `Round ${state.k} of ${maxRound}`;
     $("prev").disabled = state.k === 0;
     $("next").disabled = state.k === maxRound;
-    history.replaceState(null, "", `#round=${state.k}&gasket=${state.gasket ? 1 : 0}`);
+    writeHash();
     render();
   }
   function render() {
     countsTable();
-    layerTable();
+    if (isType()) typePanel(); else layerTable();
+    typesTable();
     geometry();
     graphPanel();
     legend();
     draw();
   }
+  // while dragging: only the cheap parts; geometry and graph once it settles
+  let heavyTimer = 0;
+  function renderLight() {
+    countsTable();
+    typePanel();
+    typesTable();
+    draw();
+    clearTimeout(heavyTimer);
+    heavyTimer = setTimeout(() => { geometry(); graphPanel(); writeHash(); }, 250);
+  }
+
+  function setShape(n) {
+    state.shape = n;
+    state.hover = state.layerHi = state.hoverVertex = -1;
+    document.body.classList.toggle("mode-type", n > 0);
+    $("shape").value = n;
+    if (n) {
+      recomputeLive();
+      const T = curType(), rigid = typeInfo[n].dof === 0;
+      $("subtitle").textContent = `Type ${n} tiling pentagon (${T.by}) · computed live in floating point · collinear points share one segment`;
+      $("hint").textContent = (rigid ? "Rigid shape: no free parameters · drag to pan" : "Drag a vertex to reshape · drag elsewhere to pan") +
+        " · scroll to zoom · ←/→ rounds · G toggles gasket";
+    } else {
+      useRegular();
+      $("subtitle").textContent = "Regular pentagon · every point exact in Q(√5) · collinear points share one segment";
+      $("hint").textContent = "Scroll to zoom · drag to pan · ←/→ rounds · G toggles gasket";
+    }
+    fit();
+    setRound(state.k);
+  }
+
+  // Move vertex i towards (tx, ty) while keeping the type's conditions. The
+  // dragged vertex is weighted heavily, the two vertices across from it
+  // moderately, so the shape bends near the cursor. Moves in small steps and
+  // stops at the last shape that is still convex and on the constraints.
+  function dragVertexTo(i, tx, ty) {
+    const T = curType();
+    let x = shapes[T.n];
+    const size = Math.sqrt(TT.measure(x).area);
+    const fx = x[2 * i], fy = x[2 * i + 1];
+    const steps = Math.min(40, Math.max(1, Math.ceil(Math.hypot(tx - fx, ty - fy) / (0.03 * size))));
+    const w = new Array(10).fill(1);
+    w[2 * i] = w[2 * i + 1] = 1e6;
+    for (const j of [(i + 2) % 5, (i + 3) % 5]) w[2 * j] = w[2 * j + 1] = 1e2;
+    let moved = false;
+    for (let s = 1; s <= steps; s++) {
+      const tgt = x.slice();
+      tgt[2 * i] = fx + (tx - fx) * s / steps;
+      tgt[2 * i + 1] = fy + (ty - fy) * s / steps;
+      const r = TT.project(T, tgt, w, 30);
+      if (!(r.res < 1e-10) || !TT.valid(r.x)) break;
+      x = r.x;
+      moved = true;
+    }
+    if (moved) shapes[T.n] = x;
+    return moved;
+  }
+  function vertexAt(mx, my) {
+    if (!isType() || typeInfo[state.shape].dof === 0) return -1;
+    const x = shapes[state.shape];
+    let best = -1, bd = 13 * 13;
+    for (let i = 0; i < 5; i++) {
+      const dx = sx(x[2 * i]) - mx, dy = sy(x[2 * i + 1]) - my, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
 
   // ------------------------------------------------------------ events ---
-  $("slider").max = maxRound;
+  $("shape").innerHTML = `<option value="0">Regular pentagon (exact)</option>` +
+    TT.TYPES.map((T) => `<option value="${T.n}">Type ${T.n}</option>`).join("");
+  $("shape").addEventListener("change", (e) => setShape(+e.target.value));
+  $("resetShape").addEventListener("click", () => {
+    if (!isType()) return;
+    shapes[state.shape] = TT.initial(curType());
+    setShape(state.shape);
+  });
+  $("typesTable").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-shape]");
+    if (tr) setShape(+tr.dataset.shape);
+  });
+  $("csvSummary").addEventListener("click", csvSummary);
+  $("csvPoints").addEventListener("click", csvPoints);
   $("slider").addEventListener("input", (e) => setRound(+e.target.value));
   $("prev").addEventListener("click", () => setRound(state.k - 1));
   $("next").addEventListener("click", () => setRound(state.k + 1));
@@ -554,16 +855,19 @@
     const tr = e.target.closest("tr");
     if (tr) setRound(+tr.dataset.k);
   });
-  $("layerTable").addEventListener("mouseover", (e) => {
-    const tr = e.target.closest("tr[data-layer]");
-    const j = tr ? +tr.dataset.layer : -1;
-    if (j !== state.layerHi) { state.layerHi = j; draw(); }
-  });
-  $("layerTable").addEventListener("mouseleave", () => { state.layerHi = -1; draw(); });
+  for (const id of ["layerTable", "typeLayers"]) {
+    $(id).addEventListener("mouseover", (e) => {
+      const tr = e.target.closest("tr[data-layer]");
+      const j = tr ? +tr.dataset.layer : -1;
+      if (j !== state.layerHi) { state.layerHi = j; draw(); }
+    });
+    $(id).addEventListener("mouseleave", () => { state.layerHi = -1; draw(); });
+  }
   $("zoomIn").addEventListener("click", () => zoomAt(wrap.clientWidth / 2, wrap.clientHeight / 2, 1.5));
   $("zoomOut").addEventListener("click", () => zoomAt(wrap.clientWidth / 2, wrap.clientHeight / 2, 1 / 1.5));
   $("reset").addEventListener("click", () => { fit(); draw(); });
   document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "SELECT") return;
     if (e.target.tagName === "INPUT" && e.target.type !== "checkbox" && e.target.type !== "range") return;
     if (e.key === "ArrowRight") { setRound(state.k + 1); e.preventDefault(); }
     else if (e.key === "ArrowLeft") { setRound(state.k - 1); e.preventDefault(); }
@@ -576,38 +880,69 @@
     zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
   }, { passive: false });
 
-  let drag = null;
+  let drag = null, pending = null, frame = 0;
+  const canvasXY = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
   cv.addEventListener("pointerdown", (e) => {
-    drag = { x: e.clientX, y: e.clientY, ox: state.ox, oy: state.oy };
+    const [mx, my] = canvasXY(e);
+    const vi = vertexAt(mx, my);
+    drag = vi >= 0 ? { vertex: vi } : { x: e.clientX, y: e.clientY, ox: state.ox, oy: state.oy };
     cv.setPointerCapture(e.pointerId);
     cv.classList.add("dragging");
+    state.hover = -1;
     hideTip();
   });
   cv.addEventListener("pointermove", (e) => {
-    if (drag) {
+    if (drag && drag.vertex != null) {
+      const [mx, my] = canvasXY(e);
+      pending = [(mx - state.ox) / state.scale, (state.oy - my) / state.scale];
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (!pending || !drag) return;
+        const [tx, ty] = pending;
+        pending = null;
+        if (dragVertexTo(drag.vertex, tx, ty)) { recomputeLive(); renderLight(); }
+      });
+    } else if (drag) {
       state.ox = drag.ox + e.clientX - drag.x;
       state.oy = drag.oy + e.clientY - drag.y;
       draw();
     } else {
-      pointTip(e);
+      const [mx, my] = canvasXY(e);
+      const vi = vertexAt(mx, my);
+      cv.classList.toggle("over-vertex", vi >= 0);
+      if (vi !== state.hoverVertex) { state.hoverVertex = vi; draw(); }
+      if (vi >= 0) {
+        const m = TT.measure(shapes[state.shape]), V = "ABCDE"[vi];
+        showTip(e, `<b>Vertex ${V}</b><br>angle ${m.ang[V].toFixed(4)}°<br>drag to reshape`);
+      } else pointTip(e);
     }
   });
   const endDrag = () => { drag = null; cv.classList.remove("dragging"); };
   cv.addEventListener("pointerup", endDrag);
   cv.addEventListener("pointercancel", endDrag);
-  cv.addEventListener("pointerleave", () => { if (!drag) { state.hover = -1; hideTip(); draw(); } });
+  cv.addEventListener("pointerleave", () => { if (!drag) { state.hover = state.hoverVertex = -1; hideTip(); draw(); } });
   cv.addEventListener("dblclick", () => { fit(); draw(); });
 
   new ResizeObserver(() => { fit(); resize(); }).observe(wrap);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
 
-  // initial state from the URL, e.g. index.html#round=3&gasket=0
+  // initial state from the URL, e.g. index.html#type=7&round=2&gasket=1
+  // (v= holds a dragged shape: xA,yA,...,xE,yE)
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get("gasket") === "0") { state.gasket = false; $("gasket").checked = false; }
-  fit();
+  state.k = +(hash.get("round") || 0);
   growthChart($("growthChart"));
   fitChart($("fitChart"));
   growthText();
   goldenPanel();
-  setRound(+(hash.get("round") || 0));
+  const t0 = +(hash.get("type") || 0);
+  if (t0 >= 1 && t0 <= TT.TYPES.length) {
+    const v = (hash.get("v") || "").split(",").map(Number);
+    if (v.length === 10 && v.every(isFinite)) {
+      const T = TT.TYPES[t0 - 1], r = TT.project(T, v, null, 50);
+      if (r.res < 1e-10 && TT.valid(r.x)) shapes[t0] = r.x;
+    }
+  }
+  setShape(t0 >= 1 && t0 <= TT.TYPES.length ? t0 : 0);
+  setTimeout(fillSummaries, 50);
 })();

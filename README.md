@@ -16,6 +16,21 @@ open web/index.html                 # visualizer (no server needed)
 Rounds are cached in `cache/`. Delete it, or pass `--fresh` to `export.py`, after changing the rules.
 Views can be linked with a URL hash, for example `web/index.html#round=3&gasket=0`.
 
+## The 15 tiling pentagon types (visualizer)
+
+The **Shape** menu also offers the 15 types of convex pentagon that tile the plane. Each type is defined by its conditions, with sides a = EA, b = AB, c = BC, d = CD, e = DE.
+For these shapes the browser runs the same rounds live, in floating point (`web/live-engine.js`, `web/live-analysis.js`).
+The same code reproduces the exact regular-pentagon counts and graph statistics.
+
+- **Dragging.** Drag a vertex to explore the type's family. `web/tile-types.js` keeps the shape on its conditions with a weighted Newton projection and refuses non-convex shapes.
+  Types 14 and 15 are rigid (0 free parameters), so they can't be dragged.
+- **Starting shapes** are read off the reference figure, then solved exactly. Type 11 starts at B = 150°, where its angles are 90/150/60/120/120.
+- **Tolerances.** Crossings closer than 1e-11 count as one point. True concurrences agree to about 1e-13, and distinct round-3 crossings can be as close as about 1e-9.
+  If a dragged shape ever pushes two crossings below 1e-11, the Euler check on the page fails, which flags that round's counts as approximate.
+- **Data.** The panel shows the live conditions, angles and sides, free parameters, nested-pentagon area ratios, per-round counts, geometry and the arrangement graph.
+  The Laplacian spectrum is computed for graphs up to 1,000 vertices, so not for round 3 of a tiling type, which has about 37,000.
+  It also has a table comparing all shapes, plus CSV export. A link such as `web/index.html#type=7&round=3` opens a type. Once a shape has been dragged, the link also carries it (`v=...`).
+
 ## Rules used
 
 - **Round 0** is the 5 vertices and the 5 sides.
@@ -38,7 +53,7 @@ Views can be linked with a URL hash, for example `web/index.html#round=3&gasket=
 | `golden.py` | Nested-pentagon sizes and the golden-ratio facts, each checked exactly in Q(√5) |
 | `round4.py` | Round 4: exact segment count, sampled estimate of new points |
 | `export.py` | Writes `web/data.js` for the visualizer |
-| `web/` | Visualizer: rounds, pentagasket toggle, zoom/pan, counts table, stats panel |
+| `web/` | Visualizer: rounds, pentagasket toggle, zoom/pan, counts table, stats panel; the 15 tiling types computed live (`live-engine.js`, `live-analysis.js`, `tile-types.js`) |
 
 ## Results so far (rounds 0–3)
 
