@@ -17,16 +17,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  # Upload and deploy run as separate jobs (GitHub's starter-workflow layout):
+  # the deploy job starts only after the build job has finished, so the
+  # "github-pages" artifact is fully registered before deploy-pages looks for it.
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
           path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
